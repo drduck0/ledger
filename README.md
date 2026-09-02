@@ -17,7 +17,11 @@ This folder is ready to deploy to Vercel.
 
    - `NOTION_TOKEN`
    - `NOTION_STATEMENTS_DATABASE_ID`
-   - `NOTION_TRANSACTIONS_DATABASE_ID`
+   - `NOTION_EXPENSES_DATABASE_ID
+   - `NOTION_INCOMES_DATABASE_ID`
+   - `NOTION_MONTH_DATABASE_ID`
+   - `NOTION_BUDGET_DATABASE_ID`
+   - `NOTION_TRANSACTIONS_DATABASE_ID``
 
 3. Deploy.
 
@@ -45,3 +49,20 @@ npm install
 ```
 
 For easiest testing, deploy to Vercel because the app is designed around a Vercel serverless function at `/api/save-to-notion`.
+
+
+## New finance tracker integration
+The backend now routes Ledger data directly into the existing Budget & Finance Tracker:
+- Spent → Expenses
+- Received → Incomes
+- Transactions are linked to Month Classification when the matching month exists.
+- Expenses are linked to Monthly Budget categories when a matching budget page is found.
+- Ledger Statements remains the duplicate-prevention audit record.
+
+Set these Vercel variables:
+- NOTION_TOKEN
+- NOTION_STATEMENTS_DATABASE_ID
+- NOTION_EXPENSES_DATABASE_ID
+- NOTION_INCOMES_DATABASE_ID
+- NOTION_MONTH_DATABASE_ID
+- NOTION_BUDGET_DATABASE_ID

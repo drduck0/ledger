@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/save-to-notion.js": {
-      "maxDuration": 60
-    }
-  }
-}
