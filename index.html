@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — Statement Reader</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231C2541'/%3E%3Cpath d='M18 16h28v8H27v6h15v8H27v6h19v8H18z' fill='%23EEF0E9'/%3E%3Ccircle cx='45' cy='20' r='4' fill='%23A9822F'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231C2541'/%3E%3Cpath d='M18 16h28v8H27v6h15v8H27v6h19v8H18z' fill='%23EEF0E9'/%3E%3Ccircle cx='45' cy='20' r='4' fill='%23A9822F'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#1C2541">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --paper: #EEF0E9;
+    --paper-line: #d9dccd;
+    --ink: #1C2541;
+    --ink-soft: #4a5170;
+    --margin-red: #7A2E2E;
+    --credit: #1B7A43;
+    --debit: #B23A2E;
+    --gold: #A9822F;
+    --card-bg: #FBFBF7;
+    --shadow: 0 1px 0 rgba(28,37,65,0.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background: var(--paper);
+    background-image:
+      linear-gradient(var(--paper-line) 1px, transparent 1px);
+    background-size: 100% 34px;
+    font-family:'Inter', sans-serif;
+    color:var(--ink);
+    min-height:100vh;
+    padding: 28px 16px 80px;
+  }
+  .wrap{max-width:920px;margin:0 auto;}
+
+  header.masthead{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom:3px double var(--ink);
+    padding-bottom:14px;
+    margin-bottom:22px;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  header.masthead h1{
+    font-family:'Fraunces', serif;
+    font-weight:700;
+    font-size:clamp(28px,5vw,40px);
+    letter-spacing:-0.01em;
+    margin:0;
+  }
+  header.masthead .sub{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    letter-spacing:.08em;
+  }
+
+  /* ---- upload stage ---- */
+  .dropzone{
+    display:block;
+    background:var(--card-bg);
+    border:1.5px dashed var(--gold);
+    border-radius:2px;
+    padding:40px 20px;
+    text-align:center;
+    cursor:pointer;
+    position:relative;
+    box-shadow: var(--shadow);
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--margin-red);
+    background:#fff;
+  }
+  .dropzone svg{width:34px;height:34px;color:var(--gold);margin-bottom:10px;}
+  .dropzone h3{
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:19px;
+    margin:0 0 6px;
+  }
+  .dropzone p{
+    font-size:13px;
+    color:var(--ink-soft);
+    margin:0;
+  }
+  .dropzone input{display:none;}
+
+  .status-line{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin-top:10px;
+    min-height:16px;
+  }
+
+  /* ---- chat thread ---- */
+  #thread{margin-top:26px;display:none;}
+  .msg{
+    display:flex;
+    gap:12px;
+    margin-bottom:18px;
+    align-items:flex-start;
+  }
+  .msg .avatar{
+    width:30px;height:30px;flex:0 0 30px;
+    border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Fraunces',serif;font-weight:700;font-size:13px;
+    color:#fff;
+    margin-top:2px;
+  }
+  .msg.user .avatar{background:var(--ink);}
+  .msg.bot .avatar{background:var(--ink);}
+  .bubble{
+    background:var(--card-bg);
+    padding:14px 18px;
+    border-radius:2px;
+    box-shadow:var(--shadow);
+    flex:1;
+    font-size:14.5px;
+    line-height:1.55;
+  }
+  .msg.user .bubble{border-left-color:var(--ink);}
+  .bubble .headline{
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:18px;
+    margin:0 0 0 8px;
+  }
+  .stamp{
+    display:inline-block;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:.06em;
+    padding:2px 7px;
+    border:1.5px solid currentColor;
+    border-radius:3px;
+    transform:rotate(-2deg);
+    text-transform:uppercase;
+    margin-left:6px;
+  }
+  .stamp.credit{color:var(--credit);}
+  .stamp.debit{color:var(--debit);}
+  .stamp.gold{color:var(--gold);}
+
+  .num{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+  .num.cr{color:var(--credit);}
+  .num.dr{color:var(--debit);}
+
+  .kpi-row{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:10px;
+    margin:14px 0 6px;
+  }
+  .kpi{
+    background:#fff;
+    border:1px solid var(--paper-line);
+    border-radius:2px;
+    padding:10px 12px;
+  }
+  .kpi .label{
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--ink-soft);
+    margin-bottom:4px;
+  }
+  .kpi .value{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:17px;}
+
+  /* ---- category ledger ---- */
+  .card{
+    background:var(--card-bg);
+    border:1px solid var(--paper-line);
+    box-shadow:var(--shadow);
+    border-radius:2px;
+    padding:20px;
+    margin-top:22px;
+  }
+  .card h2{
+    font-family:'Fraunces',serif;
+    font-size:20px;
+    font-weight:600;
+    margin:0 0 4px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .card .card-sub{font-size:12.5px;color:var(--ink-soft);margin-bottom:14px;}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  thead th{
+    text-align:left;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--ink-soft);
+    padding:6px 8px;
+    border-bottom:2px solid var(--ink);
+  }
+  tbody td{
+    padding:7px 8px;
+    border-bottom:1px solid var(--paper-line);
+    vertical-align:middle;
+  }
+  tbody tr:hover{background:#f7f6ee;}
+  td.amt{text-align:right;font-family:'IBM Plex Mono',monospace;}
+  select.cat-select{
+    font-family:'Inter',sans-serif;
+    font-size:12px;
+    border:1px solid var(--paper-line);
+    border-radius:3px;
+    padding:3px 6px;
+    background:#fff;
+    color:var(--ink);
+  }
+
+  .cat-bar{
+    display:flex;align-items:center;gap:10px;padding:6px 4px;
+    cursor:pointer;border-radius:3px;
+    transition:background .12s ease;
+  }
+  .cat-bar:hover{background:#f2f1e6;}
+  .cat-bar.active{background:#e9e6d4;}
+  .cat-bar .cname{width:170px;font-size:13px;flex:0 0 170px;}
+  .cat-bar .track{flex:1;height:9px;background:var(--paper-line);border-radius:5px;overflow:hidden;}
+  .cat-bar .fill{height:100%;background:var(--margin-red);}
+  .cat-bar .camt{width:90px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;flex:0 0 90px;}
+  .category-chart-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .category-chart-toggle{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--paper-line);border-radius:4px;background:#fff;flex:0 0 auto;}
+  .category-chart-toggle-btn{appearance:none;border:0;background:transparent;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding:6px 9px;border-radius:2px;cursor:pointer;transition:background .12s ease,color .12s ease;white-space:nowrap;}
+  .category-chart-toggle-btn:hover{color:var(--ink);}
+  .category-chart-toggle-btn.active{background:var(--ink);color:#fff;}
+  .category-chart-view{margin-top:14px;}
+  .category-chart-view canvas{display:block;width:100% !important;max-height:320px;}
+
+
+  .filter-row{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    margin-bottom:14px;padding-bottom:14px;
+    border-bottom:1px solid var(--paper-line);
+  }
+  .filter-row label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--ink-soft);
+  }
+  select.filter-select{
+    font-family:'Inter',sans-serif;
+    font-size:12.5px;
+    border:1px solid var(--paper-line);
+    border-radius:3px;
+    padding:5px 8px;
+    background:#fff;
+    color:var(--ink);
+  }
+  tr.hidden-row{display:none;}
+  .empty-filter{
+    text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;
+  }
+
+  .search-box{
+    min-width:220px;
+    flex:1 1 220px;
+    appearance:none;
+    border:1px solid var(--paper-line);
+    border-radius:5px;
+    padding:8px 12px 8px 36px;
+    background:#fff;
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    font-size:12.5px;
+    line-height:1.2;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234a5170' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;
+    background-position:12px center;
+    transition:border-color .12s ease, box-shadow .12s ease;
+  }
+  .search-box::placeholder{color:#7b8198;}
+  .search-box:focus{
+    outline:none;
+    border-color:var(--ink);
+    box-shadow:0 0 0 2px rgba(28,37,65,.08);
+  }
+
+  .recur-item{
+    display:flex;align-items:center;gap:12px;
+    padding:10px 4px;
+    border-bottom:1px solid var(--paper-line);
+  }
+  .recur-item:last-child{border-bottom:none;}
+  .recur-payee{flex:1;min-width:0;}
+  .recur-payee .name{font-size:13.5px;font-weight:600;}
+  .recur-payee .meta{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
+  .recur-amt{
+    text-align:right;flex:0 0 auto;
+  }
+  .recur-amt .per{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:14px;}
+  .recur-amt .tot{font-size:11px;color:var(--ink-soft);}
+
+  .insight-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(240px,0.75fr);gap:22px;align-items:start;}
+  .insight-heading{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    margin-bottom:4px;
+  }
+  .insight-heading h2{margin:0;}
+  .insight-toggle{
+    display:inline-flex;
+    align-items:center;
+    padding:2px;
+    border:1px solid var(--paper-line);
+    border-radius:4px;
+    background:#fff;
+    flex:0 0 auto;
+  }
+  .insight-toggle-btn{
+    appearance:none;
+    border:0;
+    background:transparent;
+    color:var(--ink-soft);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    padding:6px 10px;
+    border-radius:2px;
+    cursor:pointer;
+    transition:background .12s ease,color .12s ease;
+  }
+  .insight-toggle-btn:hover{color:var(--ink);}
+  .insight-toggle-btn.active{
+    background:var(--ink);
+    color:#fff;
+  }
+  .insight-toggle-btn.active[data-insight-view="spending"]{
+    background:var(--debit);
+  }
+  .insight-toggle-btn.active[data-insight-view="received"]{
+    background:var(--credit);
+  }
+  .insight-view{margin-top:2px;}
+  .insight-panel{min-width:0;}
+  .insight-panel + .insight-panel{border-left:1px solid var(--paper-line);padding-left:22px;}
+  .insight-panel h3{font-family:'Fraunces',serif;font-size:16px;font-weight:600;margin:0 0 4px;}
+  .insight-recurring{
+    margin-top:20px;
+    padding-top:18px;
+    border-top:1px solid var(--paper-line);
+  }
+  .insight-panel .insight-sub{font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;}
+  .merchant-list{display:flex;flex-direction:column;gap:0;}
+  .merchant-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--paper-line);font-size:12.5px;}
+  .merchant-row:last-child{border-bottom:none;}
+  .merchant-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .merchant-meta{font-size:10.5px;color:var(--ink-soft);margin-top:2px;}
+  .merchant-total{font-family:'IBM Plex Mono',monospace;font-weight:600;white-space:nowrap;}
+  .insight-spending{color:var(--debit);}
+  .insight-received{color:var(--credit);}
+  .insight-facts{display:grid;gap:0;}
+  .fact{padding:10px 0;border-bottom:1px solid var(--paper-line);}
+  .fact:last-child{border-bottom:none;}
+  .fact-label{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin-bottom:3px;}
+  .fact-value{font-size:14px;font-weight:600;}
+  .fact-detail{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+  .insight-receipts .big-item{padding:8px 0;}
+  .insight-receipts .big-item .r{max-width:240px;}
+
+  .big-item{
+    display:flex;justify-content:space-between;gap:8px;
+    padding:7px 0;
+    border-bottom:1px solid var(--paper-line);
+    font-size:12.5px;
+  }
+  .big-item:last-child{border-bottom:none;}
+  .big-item .r{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-soft);}
+  .big-item .a{flex:0 0 auto;font-family:'IBM Plex Mono',monospace;font-weight:600;}
+
+  @media (max-width:700px){
+    .insight-heading{align-items:flex-start;flex-wrap:wrap;}
+    .insight-toggle{margin-left:auto;}
+    .insight-grid{grid-template-columns:1fr;gap:18px;}
+    .insight-panel + .insight-panel{border-left:none;border-top:1px solid var(--paper-line);padding-left:0;padding-top:18px;}
+  }
+
+  canvas{max-height:280px;}
+
+  .txn-row-date{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);white-space:nowrap;}
+  .txn-row-remark{font-size:12.5px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+  footer{
+    text-align:center;
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-top:40px;
+    font-family:'IBM Plex Mono',monospace;
+  }
+
+  .reset-link{
+    display:inline-block;margin-top:14px;font-size:12px;color:var(--ink-soft);
+    cursor:pointer;text-decoration:underline;
+  }
+
+  .notion-save-btn{
+    border:0;border-radius:8px;padding:8px 12px;margin-left:10px;cursor:pointer;
+    background:#111;color:#fff;font-weight:700;font-size:12px;
+  }
+  .notion-save-btn:disabled{opacity:.6;cursor:wait;}
+  .notion-status{font-size:12px;margin:10px 0;text-align:center;color:var(--ink-soft);}
+  .notion-status.success{color:#16803c;}
+  .notion-status.error{color:#b42318;}
+
+  .welcome{
+    display: flex;
+    align-items: center;
+    gap: "4px";
+  }
+
+  @media (max-width:600px){
+    .cat-bar .cname{width:110px;flex-basis:110px;font-size:12px;}
+    .cat-bar .camt{width:74px;flex-basis:74px;}
+    .txn-row-remark{max-width:140px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <h1>Ledger</h1>
+    <div class="sub">Statement Reader &amp; Monthly Tally</div>
+  </header>
+
+  <div id="uploadStage">
+    <label class="dropzone" id="dropzone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+      <h3>Drop your statement here</h3>
+      <p>PDF bank or credit-card statement · parsed entirely on this page, nothing leaves your browser</p>
+      <input type="file" id="fileInput" accept="application/pdf">
+    </label>
+    <div class="status-line" id="statusLine"></div>
+  </div>
+
+  <div id="thread"></div>
+
+  <div id="results" style="display:none;">
+
+    <div class="card">
+      <div class="insight-heading">
+        <h2>Spending insights <span class="stamp gold">auto-detected</span></h2>
+        <div class="insight-toggle" role="group" aria-label="Insight view">
+          <button type="button" class="insight-toggle-btn active" data-insight-view="spending" aria-pressed="true">Spending</button>
+          <button type="button" class="insight-toggle-btn" data-insight-view="received" aria-pressed="false">Received</button>
+        </div>
+      </div>
+      <div class="card-sub" id="insightCardSub">Useful patterns from this statement — top merchants, busiest spending day, largest expense, and transactions that still need review.</div>
+
+      <div id="spendingInsightView" class="insight-view">
+        <div class="insight-grid">
+          <div class="insight-panel">
+            <h3>Top merchants</h3>
+            <div class="insight-sub">Highest total spend by merchant or payee</div>
+            <div class="merchant-list" id="topMerchants"></div>
+          </div>
+          <div class="insight-panel">
+            <h3>Behavior snapshot</h3>
+            <div class="insight-sub">A few numbers worth noticing</div>
+            <div class="insight-facts" id="insightFacts"></div>
+          </div>
+        </div>
+
+        <div class="insight-recurring">
+          <div class="insight-panel">
+            <h3>Recurring payments</h3>
+            <div class="insight-sub">Repeated amounts and payees that may be subscriptions, SIPs, EMIs, or regular bills</div>
+            <div id="recurringInsightList"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="receivedInsightView" class="insight-view" style="display:none;">
+        <div class="insight-grid">
+          <div class="insight-panel">
+            <h3>Top sources</h3>
+            <div class="insight-sub">Highest total money received by sender or source</div>
+            <div class="merchant-list" id="topCreditSources"></div>
+          </div>
+          <div class="insight-panel">
+            <h3>Behavior snapshot</h3>
+            <div class="insight-sub">A few numbers worth noticing</div>
+            <div class="insight-facts" id="receivedInsightFacts"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="category-chart-header">
+        <h2 id="categoryChartTitle" style="margin-bottom:0;">Category tally</h2>
+        <div class="category-chart-toggle" role="group" aria-label="Category tally chart">
+          <button type="button" class="category-chart-toggle-btn active" data-category-chart="categories" aria-pressed="true">Categories</button>
+          <button type="button" class="category-chart-toggle-btn" data-category-chart="where" aria-pressed="false">Where it went</button>
+          <button type="button" class="category-chart-toggle-btn" data-category-chart="balance" aria-pressed="false">Balance over time</button>
+        </div>
+      </div>
+      <div id="categoryChartCategories" class="category-chart-view">
+        <div class="card-sub">Debits grouped by category. Click a bar to filter, or change a row's category. Your manual category choices are remembered locally for matching merchants.</div>
+        <div id="catBars"></div>
+      </div>
+      <div id="categoryChartWhere" class="category-chart-view" style="display:none;">
+        <div class="card-sub">Debit categories, by share of total spend.</div>
+        <canvas id="pieCanvas"></canvas>
+      </div>
+      <div id="categoryChartBalance" class="category-chart-view" style="display:none;">
+        <div class="card-sub">Running balance across the statement period.</div>
+        <canvas id="balanceCanvas"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Full transaction ledger</h2>
+      <div class="card-sub" id="txnCount"></div>
+      <div class="filter-row">
+        <input type="text" id="searchBox" class="filter-select search-box" placeholder="Search a merchant, note, date, category, or ID…">
+        <select id="catFilter" class="cat-select filter-select">
+          <option value="all">All categories</option>
+        </select>
+        <select id="drcrFilter" class="cat-select filter-select">
+          <option value="all">All (spent &amp; received)</option>
+          <option value="Dr">Spent only</option>
+          <option value="Cr">Received only</option>
+        </select>
+        <span class="reset-link" id="clearFilter" style="display:none;">✕ Clear filter</span>
+        <span class="reset-link" id="exportCsv" style="margin-left:auto;">⤓ Export CSV</span>
+        <button type="button" id="saveToNotion" class="notion-save-btn">☁ Save to Notion</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Remarks</th><th>Category</th><th style="text-align:right;">Amount</th></tr>
+          </thead>
+          <tbody id="txnBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="notionStatus" class="notion-status" aria-live="polite"></div>
+    <div style="text-align:center;">
+      <span class="reset-link" id="resetLink">↺ Read a different statement</span>
+    </div>
+  </div>
+
+  <footer>Parsed locally in your browser · data is only sent to Notion when you choose “Save to Notion”</footer>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const statusLine = document.getElementById('statusLine');
+const thread = document.getElementById('thread');
+const results = document.getElementById('results');
+const uploadStage = document.getElementById('uploadStage');
+
+let ALL_TXNS = []; // {date, id, remarks, amount, drcr, balance, category}
+let STATEMENT_TYPE = 'bank'; // 'bank' or 'credit-card'
+let CC_PREVIOUS_BALANCE = null;
+let pieChart = null;
+let balanceChart = null;
+let catFilter = 'all';
+let drcrFilterVal = 'all';
+let searchTerm = '';
+let categoryRules = loadCategoryRules();
+
+['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+document.getElementById('resetLink').addEventListener('click', () => location.reload());
+
+let insightView = 'spending';
+
+function setInsightView(view){
+  insightView = view === 'received' ? 'received' : 'spending';
+
+  const spendingView = document.getElementById('spendingInsightView');
+  const receivedView = document.getElementById('receivedInsightView');
+  const sub = document.getElementById('insightCardSub');
+
+  spendingView.style.display = insightView === 'spending' ? 'block' : 'none';
+  receivedView.style.display = insightView === 'received' ? 'block' : 'none';
+
+  document.querySelectorAll('.insight-toggle-btn').forEach(btn => {
+    const active = btn.dataset.insightView === insightView;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+
+  if (sub){
+    sub.textContent = insightView === 'spending'
+      ? 'Useful patterns from this statement — top merchants, busiest spending day, largest expense, and transactions that still need review.'
+      : 'Useful patterns from this statement — top receiving sources, strongest receipt day, largest receipt, and transactions that still need review.';
+  }
+}
+
+document.querySelectorAll('.insight-toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => setInsightView(btn.dataset.insightView));
+});
+
+let categoryChartView = 'categories';
+
+function setCategoryChartView(view){
+  categoryChartView = ['categories','where','balance'].includes(view) ? view : 'categories';
+
+  const views = {
+    categories: document.getElementById('categoryChartCategories'),
+    where: document.getElementById('categoryChartWhere'),
+    balance: document.getElementById('categoryChartBalance')
+  };
+
+  const titles = {
+    categories: 'Category tally',
+    where: 'Where it went',
+    balance: 'Balance over time'
+  };
+
+  Object.entries(views).forEach(([key, el]) => {
+    if (el) el.style.display = key === categoryChartView ? 'block' : 'none';
+  });
+
+  const title = document.getElementById('categoryChartTitle');
+  if (title) title.textContent = titles[categoryChartView];
+
+  document.querySelectorAll('.category-chart-toggle-btn').forEach(btn => {
+    const active = btn.dataset.categoryChart === categoryChartView;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+
+  if (categoryChartView === 'where' && pieChart) pieChart.resize();
+  if (categoryChartView === 'balance' && balanceChart) balanceChart.resize();
+}
+document.querySelectorAll('.category-chart-toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => setCategoryChartView(btn.dataset.categoryChart));
+});
+
+function setStatus(t){ statusLine.textContent = t; }
+
+function loadCategoryRules(){
+  try { return JSON.parse(localStorage.getItem('ledgerCategoryRules') || '{}'); }
+  catch(e){ return {}; }
+}
+
+function saveCategoryRules(){
+  try { localStorage.setItem('ledgerCategoryRules', JSON.stringify(categoryRules)); } catch(e) {}
+}
+
+function merchantKey(t){
+  let r = String(t.remarks || '').toLowerCase();
+  r = r.replace(/\bupi[a-z]*\b|\bimps[a-z]*\b|\btrtr\b/g,' ');
+  r = r.replace(/\b\d{4,}\b/g,' ');
+  r = r.replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+/g,' ');
+  r = r.replace(/\b(?:yesb|utib|hdfc|icic|sbin|kvbl|ratn|barb|idib|ioba|cind|sibl|cnrb|kkbk)\b/g,' ');
+  r = r.replace(/[^a-z]+/g,' ').replace(/\s+/g,' ').trim();
+  return r.slice(0,120);
+}
+
+function applySavedCategory(t){
+  const key = STATEMENT_TYPE + '|' + merchantKey(t);
+  if (!key || !categoryRules[key]) return null;
+  // Travel is now consolidated into the single "Travel & Transport" category.
+  return categoryRules[key] === 'Travel' ? 'Travel & Transport' : categoryRules[key];
+}
+
+function rememberCategory(t, category){
+  const key = STATEMENT_TYPE + '|' + merchantKey(t);
+  if (!key || key.endsWith('|')) return;
+  categoryRules[key] = category;
+  saveCategoryRules();
+}
+
+async function handleFile(file){
+  if (file.type !== 'application/pdf'){
+    setStatus('Please choose a PDF file.');
+    return;
+  }
+  setStatus('Reading ' + file.name + ' …');
+  try{
+    const buf = await file.arrayBuffer();
+    await processArrayBuffer(buf, file.name);
+  } catch(err){
+    console.error(err);
+    setStatus('Could not read that PDF (' + err.message + '). If it is password-protected, unlock it first.');
+  }
+}
+
+// Shared parsing pipeline — used by the browser file picker above and by
+// the React Native bridge below (which hands us a base64-decoded buffer).
+async function processArrayBuffer(buf, filename){
+  try{
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let lines = [];
+    for (let p = 1; p <= pdf.numPages; p++){
+      setStatus('Parsing page ' + p + ' of ' + pdf.numPages + ' …');
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      lines = lines.concat(groupIntoLines(content.items));
+    }
+    setStatus('Extracting transactions …');
+    const txns = parseTransactions(lines);
+    if (txns.length === 0){
+      setStatus('Could not find any transaction rows in this PDF. Make sure it is an unlocked, text-based bank or credit-card statement.');
+      return;
+    }
+    ALL_TXNS = txns.map(t => {
+      const category = applySavedCategory(t) || categorize(t);
+      return {...t, category: category === 'Travel' ? 'Travel & Transport' : category};
+    });
+    const ccHint = STATEMENT_TYPE === 'credit-card' ? ' · credit-card statement' : ' · bank statement';
+    setStatus('Found ' + ALL_TXNS.length + ' transactions' + ccHint + '.');
+    uploadStage.style.display = 'none';
+    renderChat(filename);
+  } catch(err){
+    console.error(err);
+    setStatus('Could not read that PDF (' + err.message + '). If it is password-protected, unlock it first.');
+  }
+}
+
+// ---- React Native bridge ----
+// When this page runs inside the Ledger mobile app's WebView, the native
+// shell picks the PDF with the phone's own file picker, reads it as
+// base64, and posts it in here — this avoids relying on an in-webview
+// <input type=file> picker, which behaves inconsistently across
+// Android/iOS. In a normal browser this code simply never fires.
+function base64ToArrayBuffer(base64){
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function handleNativeMessage(event){
+  let data = event.data;
+  try{
+    const parsed = JSON.parse(data);
+    if (parsed && parsed.type === 'pdf' && parsed.base64){
+      setStatus('Reading ' + (parsed.filename || 'statement.pdf') + ' …');
+      const buf = base64ToArrayBuffer(parsed.base64);
+      processArrayBuffer(buf, parsed.filename || 'statement.pdf');
+    }
+  } catch(e){ /* not JSON, ignore */ }
+}
+// Android WebView fires on 'message', iOS WKWebView fires on document 'message'
+document.addEventListener('message', handleNativeMessage);
+window.addEventListener('message', handleNativeMessage);
+
+// Inside the native app, hand file picking over to the phone's own
+// document picker instead of the web file input.
+const inNativeApp = !!(window.ReactNativeWebView);
+if (inNativeApp){
+  dropzone.querySelector('h3').textContent = 'Tap to choose your statement';
+  dropzone.querySelector('p').textContent = 'PDF bank or credit-card statement · parsed entirely on your phone';
+  dropzone.addEventListener('click', e => {
+    e.preventDefault();
+    window.ReactNativeWebView.postMessage(JSON.stringify({type:'requestFile'}));
+  }, true);
+}
+
+// group pdf.js text items into visual lines by y-position, then order by x
+function groupIntoLines(items){
+  const rows = [];
+  items.forEach(it => {
+    if (!it.str.trim()) return;
+    const y = Math.round(it.transform[5]);
+    let row = rows.find(r => Math.abs(r.y - y) <= 3);
+    if (!row){ row = {y, parts: []}; rows.push(row); }
+    row.parts.push({x: it.transform[4], str: it.str});
+  });
+  rows.sort((a,b) => b.y - a.y);
+  return rows.map(r => r.parts.sort((a,b) => a.x - b.x).map(p => p.str).join(' ').replace(/\s+/g,' ').trim());
+}
+
+// The original bank-statement format has one complete transaction per line:
+// 01-08-2026 U61491322 ... 51.00(Dr) 8945.26(Cr)
+// -------- Statement parsers --------
+// IMPORTANT: Do not depend on exact PDF column alignment. PDF.js/WebViews can
+// reorder or split text objects differently between platforms. Instead we
+// detect transaction anchors (date + id) and then extract the amount from the
+// transaction text itself.
+const BANK_ANCHOR_RE = /(\d{2}-\d{2}-\d{4})\s+(\S+)/;
+const BANK_VALUE_RE = /([\d,]+\.\d{2})\s*\((Dr|Cr)\)\s+([\d,]+\.\d{2})\s*\((Cr|Dr)\)\s*$/i;
+const CC_ANCHOR_RE = /(\d{2}\/\d{2}\/\d{4})\s+(\d{7,})\s+/;
+const CC_DOMESTIC_RE = /([\d,]+\.\d{2})\s*(CR)?\s*$/i;
+const CC_FOREIGN_RE = /([\d,]+\.\d{2})\s+(USD|EUR|GBP|AED|SGD|AUD|CAD|JPY)\s+([\d,]+\.\d{2})\s*(CR)?\s*$/i;
+
+function cleanPdfText(s){
+  return String(s || '')
+    .replace(/[Á`]/g, '₹')
+    .replace(/[\u00a0\u2000-\u200b]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function detectStatementType(lines){
+  const text = lines.map(cleanPdfText).join(' ').toLowerCase();
+  const looksCC = [
+    /credit card statement/,
+    /previous balance.*purchases\s*\/\s*charges/,
+    /credit limit \(including cash\)/,
+    /transaction details.*reward points/,
+    /payment due date.*statement date/
+  ].some(r => r.test(text));
+  return looksCC ? 'credit-card' : 'bank';
+}
+
+function parseMoney(s){
+  return parseFloat(String(s).replace(/,/g, ''));
+}
+
+function dedupeTransactions(txns){
+  const seen = new Set();
+  return txns.filter(t => {
+    const key = [t.date, t.id, t.amount.toFixed(2), t.drcr, t.remarks].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function extractCreditCardPreviousBalance(lines){
+  const text = lines.map(cleanPdfText).join(' ');
+  const m = text.match(/Previous Balance\s+Purchases\s*\/\s*Charges\s+Cash Advances\s+Payments\s*\/\s*Credits\s+[^0-9₹`]*₹?\s*([\d,]+\.\d{2})/i);
+  return m ? parseMoney(m[1]) : null;
+}
+
+function parseBankTransactions(lines){
+  const out = [];
+  const seen = new Set();
+
+  for (const raw of lines) {
+    const line = cleanPdfText(raw);
+    const a = line.match(BANK_ANCHOR_RE);
+    if (!a) continue;
+
+    // Keep only the transaction portion starting at date + id.
+    const txLine = line.slice(a.index);
+    const m = txLine.match(/^(\d{2}-\d{2}-\d{4})\s+(\S+)\s+(.+?)\s+([\d,]+\.\d{2})\s*\((Dr|Cr)\)\s+([\d,]+\.\d{2})\s*\((Cr|Dr)\)\s*$/i);
+    if (!m) continue;
+
+    const tx = {
+      date: m[1],
+      id: m[2],
+      remarks: m[3].trim(),
+      amount: parseMoney(m[4]),
+      drcr: m[5].charAt(0).toUpperCase() + m[5].slice(1).toLowerCase(),
+      balance: parseMoney(m[6])
+    };
+    const key = [tx.date, tx.id, tx.amount.toFixed(2), tx.drcr, tx.balance.toFixed(2)].join('|');
+    if (!seen.has(key)) { seen.add(key); out.push(tx); }
+  }
+
+  return out;
+}
+
+function parseCreditCardTransactions(lines){
+  const out = [];
+  let current = null;
+
+  // Join only text that belongs to the current transaction. A new date+serial
+  // always starts a new row. This handles ICICI rows that wrap merchant text
+  // onto another visual line in PDF.js/mobile WebView.
+  const flush = () => {
+    if (!current) return;
+    let detail = cleanPdfText(current.parts.join(' '));
+
+    // International row: foreign amount + currency + INR amount.
+    let m = detail.match(CC_FOREIGN_RE);
+    let amount = null, drcr = 'Dr', cutAt = -1;
+    if (m) {
+      amount = parseMoney(m[3]);
+      drcr = m[4] ? 'Cr' : 'Dr';
+      cutAt = m.index;
+    } else {
+      m = detail.match(CC_DOMESTIC_RE);
+      if (m) {
+        amount = parseMoney(m[1]);
+        drcr = m[2] ? 'Cr' : 'Dr';
+        cutAt = m.index;
+      }
+    }
+    if (amount === null || Number.isNaN(amount)) { current = null; return; }
+
+    let remarks = detail.slice(0, cutAt).trim();
+    // Last numeric field before amount is Reward Points. Remove only that
+    // column, leaving merchant names and locations intact.
+    remarks = remarks.replace(/\s+-?\d+(?:\.\d+)?\s*$/i, '').trim();
+    if (!remarks) remarks = 'Credit card transaction';
+
+    out.push({
+      date: current.date,
+      id: current.id,
+      remarks,
+      amount,
+      drcr,
+      balance: null
+    });
+    current = null;
+  };
+
+  for (const raw of lines) {
+    const line = cleanPdfText(raw);
+    const m = line.match(CC_ANCHOR_RE);
+    if (m) {
+      flush();
+      current = {
+        date: m[1].replace(/\//g, '-'),
+        id: m[2],
+        parts: [line.slice(m.index + m[0].length).trim()]
+      };
+    } else if (current && line &&
+               !/^Page\s+\d+\s+of\s+\d+$/i.test(line) &&
+               !/^Date\s+SerNo\./i.test(line) &&
+               !/^International Spends/i.test(line)) {
+      current.parts.push(line);
+    }
+  }
+  flush();
+
+  return dedupeTransactions(out);
+}
+
+function parseTransactions(lines){
+  STATEMENT_TYPE = detectStatementType(lines);
+  if (STATEMENT_TYPE === 'credit-card') {
+    CC_PREVIOUS_BALANCE = extractCreditCardPreviousBalance(lines);
+    // Use the anchor/chunk parser as the primary CC parser. It is deliberately
+    // independent of PDF visual column placement and therefore works in
+    // browser PDF.js and React-Native WebView alike.
+    return parseCreditCardFromJoinedText(lines);
+  }
+  CC_PREVIOUS_BALANCE = null;
+  let bank = parseBankTransactions(lines);
+  if (bank.length === 0) bank = parseBankFromJoinedText(lines);
+  return bank;
+}
+
+function parseBankFromJoinedText(lines){
+  const text = lines.map(cleanPdfText).join(' ');
+  const out = [];
+  const re = /(\d{2}-\d{2}-\d{4})\s+(\S+)\s+(.+?)\s+([\d,]+\.\d{2})\s*\((Dr|Cr)\)\s+([\d,]+\.\d{2})\s*\((Cr|Dr)\)/gi;
+  let m;
+  while ((m = re.exec(text))) {
+    out.push({date:m[1], id:m[2], remarks:m[3].trim(), amount:parseMoney(m[4]), drcr:m[5].charAt(0).toUpperCase() + m[5].slice(1).toLowerCase(), balance:parseMoney(m[6])});
+  }
+  return dedupeTransactions(out);
+}
+
+function parseCreditCardFromJoinedText(lines){
+  const text = lines.map(cleanPdfText).join(' ');
+  const anchors = [];
+  const anchorRe = /(\d{2}\/\d{2}\/\d{4})\s+(\d{7,})\s+/g;
+  let a;
+  while ((a = anchorRe.exec(text))) {
+    anchors.push({index:a.index, end:anchorRe.lastIndex, date:a[1], id:a[2]});
+  }
+
+  const out = [];
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    const end = (i + 1 < anchors.length) ? anchors[i + 1].index : text.length;
+    let detail = text.slice(a.end, end).trim();
+    // Stop before ICICI's page/footer material. Those sections contain many
+    // unrelated monetary examples which must never become a transaction amount.
+    const footerCut = detail.search(/(?:#\s*International Spends|GREAT OFFERS ON YOUR CARD|MOST IMPORTANT TERMS AND CONDITIONS|IMPORTANT INFORMATION ON YOUR CREDIT CARD|Page\s+\d+\s+of\s+\d+)/i);
+    if (footerCut >= 0) detail = detail.slice(0, footerCut).trim();
+
+    // Take the LAST currency/amount token in this transaction chunk. This is
+    // the INR billed amount even when reward points, foreign currency values,
+    // chart labels, or wrapped text appear before/after it.
+    const moneyRe = /([\d,]+\.\d{2})(?:\s+(USD|EUR|GBP|AED|SGD|AUD|CAD|JPY))?(?:\s*(CR))?/gi;
+    const matches = [];
+    let mm;
+    while ((mm = moneyRe.exec(detail))) matches.push({...mm});
+    if (!matches.length) continue;
+
+    const m = matches[matches.length - 1];
+    let amount;
+    let drcr = m[3] ? 'Cr' : 'Dr';
+    if (m[2]) {
+      // m[1] is foreign currency; the following INR amount is the actual
+      // billed amount, so look immediately after this currency token.
+      const after = detail.slice(m.index + m[0].length);
+      const inr = after.match(/^\s*([\d,]+\.\d{2})\s*(CR)?/i);
+      if (inr) {
+        amount = parseMoney(inr[1]);
+        if (inr[2]) drcr = 'Cr';
+      } else {
+        continue;
+      }
+    } else {
+      amount = parseMoney(m[1]);
+    }
+    if (Number.isNaN(amount)) continue;
+
+    let remarks = detail.slice(0, m.index).trim();
+    // Strip the reward-points field and harmless PDF/header fragments.
+    remarks = remarks.replace(/\s+-?\d+(?:\.\d+)?\s*$/i, '').trim();
+    remarks = remarks.replace(/^(?:#\s*)?International Spends\s*/i, '').trim();
+    if (!remarks) remarks = 'Credit card transaction';
+
+    out.push({
+      date: a.date.replace(/\//g, '-'),
+      id: a.id,
+      remarks,
+      amount,
+      drcr,
+      balance: null
+    });
+  }
+  return dedupeTransactions(out);
+}
+
+function categorize(t){
+  const r = (t.remarks || '').toLowerCase();
+
+  if (STATEMENT_TYPE === 'credit-card') {
+    if (t.drcr === 'Cr' && /payment received|payment|bbps payment/.test(r)) return 'Credit Card Payment';
+    if (t.drcr === 'Cr') return 'Refund / Reversal';
+    if (/fee on wallet load|dcc fee|fuel surcharge|igst|\btax\b|\bgst\b/.test(r)) return 'Card Fees & Taxes';
+    if (/amazon pay in grocery|amazon pay.*grocery|zepto/.test(r)) return 'Groceries';
+    if (/amazon pay wallet load/.test(r)) return 'Wallet Load / Transfer';
+    if (/amazon pay in recharge/.test(r)) return 'Recharge';
+    if (/zomato|restaurant brands|swiggy|restaurant|food/.test(r)) return 'Dining';
+    if (/skin clinic|medical|hospital|pharmacy|doctor|lenskart|eyewear|optical/.test(r)) return 'Health & Personal Care';
+    if (/fuel|petrol|diesel|pump/.test(r)) return 'Fuel & Transport';
+    if (/canva|software|subscription/.test(r)) return 'Subscriptions & Software';
+    if (/insurance|icici lombard|sbi life/.test(r)) return 'Insurance';
+    if (/irctc|flight|hotel|uber|rapido/.test(r)) return 'Travel & Transport';
+    return 'Uncategorized / Review';
+  }
+
+  // Bank statement: keep only strong, explicit rules.
+  if (t.drcr === 'Dr' && /zarivaul/.test(r) && Math.abs(t.amount - 51) < 0.5) return 'Investment (SIP)';
+  if (t.drcr === 'Dr' && /amazonpayccbil/.test(r)) return 'Credit Card Payment';
+  if (t.drcr === 'Dr' && /sbi life/.test(r)) return 'Insurance';
+  if (t.drcr === 'Dr' && /irctc/.test(r)) return 'Travel & Transport';
+  if (t.drcr === 'Dr' && /pump|rapido/.test(r)) return 'Fuel & Transport';
+  if (t.drcr === 'Dr' && /bank acc/.test(r)) return 'Bank Transfer / Loan EMI';
+  if (t.drcr === 'Dr' && /amazon p/.test(r)) return 'Shopping';
+  if (t.drcr === 'Cr') return 'Money Received';
+  return 'Uncategorized / Review';
+}
+
+function fmt(n){ return '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+// Statement dates are DD-MM-YYYY; parse to a real Date for sorting/maths.
+function parseDMY(d){
+  const [dd, mm, yyyy] = d.split('-').map(Number);
+  return new Date(yyyy, mm - 1, dd);
+}
+
+// Transactions may already be in statement order, but we don't rely on
+// that for anything date-sensitive — always sort a fresh copy.
+function chronological(txns){
+  return txns
+    .map((t, i) => ({...t, _i: i}))
+    .sort((a, b) => parseDMY(a.date) - parseDMY(b.date) || a._i - b._i);
+}
+
+function renderChat(filename){
+  thread.style.display = 'block';
+  thread.innerHTML = '';
+
+  const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
+  const credits = ALL_TXNS.filter(t => t.drcr === 'Cr');
+  const totalDebit = debits.reduce((s,t)=>s+t.amount,0);
+  const totalCredit = credits.reduce((s,t)=>s+t.amount,0);
+  const invest = debits.filter(t=>t.category==='Investment (SIP)');
+  const investTotal = invest.reduce((s,t)=>s+t.amount,0);
+  const ccPaid = STATEMENT_TYPE === 'credit-card' ? credits.filter(t=>t.category==='Credit Card Payment') : debits.filter(t=>t.category==='Credit Card Payment');
+  const ccTotal = ccPaid.reduce((s,t)=>s+t.amount,0);
+  const chargeTotal = STATEMENT_TYPE === 'credit-card' ? totalDebit : totalDebit;
+  const chrono = chronological(ALL_TXNS);
+  const first = chrono[0].date, last = chrono[chrono.length-1].date;
+  const daySpan = Math.max(1, Math.round((parseDMY(last) - parseDMY(first)) / 86400000) + 1);
+  const avgDaily = totalDebit / daySpan;
+  const isCC = STATEMENT_TYPE === 'credit-card';
+  const title = isCC ? 'Here\'s your credit-card tally' : 'Here\'s the monthly tally';
+  const spendLabel = isCC ? 'Card charges' : 'Total spent';
+  const creditLabel = isCC ? 'Payments / credits' : 'Total received';
+  const net = totalDebit - totalCredit;
+  const netText = isCC ? (net >= 0 ? 'increased your outstanding card balance by ' + fmt(net) : 'reduced your outstanding card balance by ' + fmt(Math.abs(net))) : ((totalCredit-totalDebit) >=0 ? fmt(totalCredit-totalDebit)+' saved' : fmt(totalDebit-totalCredit)+' overspent');
+
+  // addMsg('user', 'U', filename + ' uploaded — ' + ALL_TXNS.length + ' transactions found (' + first + ' to ' + last + ')');
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg bot';
+  bubble.innerHTML = `
+    <div class="bubble">
+      <div class = "welcome">
+        <div class="avatar">₹</div>
+        <div class="headline">${title}</div>
+      </div>
+      <p>Across the statement period ${isCC ? 'card charges were' : 'you spent'} <span class="num dr">${fmt(totalDebit)}</span> and ${isCC ? 'payments / credits were' : 'you received'} <span class="num cr">${fmt(totalCredit)}</span>, ${isCC ? 'which ' + netText + '.' : 'net ' + netText + '.'}</p>
+      <div class="kpi-row">
+        <div class="kpi"><div class="label">${spendLabel}</div><div class="value" style="color:var(--debit)">${fmt(totalDebit)}</div></div>
+        <div class="kpi"><div class="label">${creditLabel}</div><div class="value" style="color:var(--credit)">${fmt(totalCredit)}</div></div>
+        <div class="kpi"><div class="label">${isCC ? 'Starting balance' : 'Invested (SIP)'}</div><div class="value" style="color:var(--gold)">${isCC && CC_PREVIOUS_BALANCE !== null ? fmt(CC_PREVIOUS_BALANCE) : fmt(investTotal)}</div></div>
+        <div class="kpi"><div class="label">${isCC ? 'Payment count' : 'Credit card paid'}</div><div class="value">${isCC ? ccPaid.length : fmt(ccTotal)}</div></div>
+        <div class="kpi"><div class="label">Avg. daily spend</div><div class="value">${fmt(avgDaily)}</div></div>
+      </div>
+      <p style="margin-top:10px;">
+        ${isCC ? '<span class="stamp gold">Card · '+debits.length+' charges</span><span class="stamp credit">Payments / credits · '+credits.length+'</span>' : '<span class="stamp gold">SIP · '+invest.length+' debits of ₹51</span><span class="stamp debit">Card · '+ccPaid.length+' payments</span>'}
+      </p>
+      <p style="margin-top:10px;font-size:13px;color:var(--ink-soft);">${isCC ? 'Credit-card purchases and fees are treated as debits; statement payments, refunds and reversals are treated as credits. The outstanding-balance chart is reconstructed from the opening balance and these transactions.' : 'The recurring ₹51 daily debits to <em>ZARIVAUL/paytm</em> are tallied as your investment/SIP, and payments to <em>amazonpayccbil</em> are tallied as credit card bill payments. Full breakdown and every transaction is below — you can reassign any row\'s category and the totals will update.'}</p>
+    </div>`;
+  thread.appendChild(bubble);
+
+  results.style.display = 'block';
+  const ledgerCardSub = document.getElementById('txnCount')?.closest('.card')?.querySelector('.card-sub');
+  if (ledgerCardSub){
+    ledgerCardSub.textContent = isCC
+      ? 'Reconstructed outstanding card balance across the statement period'
+      : 'Running balance across the statement period';
+  }
+  catFilter = 'all'; drcrFilterVal = 'all'; searchTerm = '';
+  setInsightView('spending');
+  populateFilterOptions(); syncFilterControls(); renderCategoryBars(); renderPie(); renderBalanceChart(); renderInsights(); renderRecurring(); renderTxnTable(); setCategoryChartView('categories');
+}
+
+function addMsg(kind, initial, text){
+  const m = document.createElement('div');
+  m.className = 'msg ' + kind;
+  m.innerHTML = `<div class="avatar">${initial}</div><div class="bubble">${text}</div>`;
+  thread.appendChild(m);
+}
+
+function categoryTotals(){
+  const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
+  const map = {};
+  debits.forEach(t => { map[t.category] = (map[t.category]||0) + t.amount; });
+  return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+}
+
+function renderCategoryBars(){
+  const totals = categoryTotals();
+  const max = Math.max(...totals.map(t=>t[1]), 1);
+  const el = document.getElementById('catBars');
+  el.innerHTML = '';
+  totals.forEach(([cat, amt]) => {
+    const row = document.createElement('div');
+    row.className = 'cat-bar' + (catFilter === cat ? ' active' : '');
+    row.innerHTML = `<div class="cname">${cat}</div><div class="track"><div class="fill" style="width:${(amt/max*100).toFixed(1)}%"></div></div><div class="camt">${fmt(amt)}</div>`;
+    row.addEventListener('click', () => {
+      catFilter = (catFilter === cat) ? 'all' : cat;
+      syncFilterControls();
+      renderCategoryBars();
+      renderTxnTable();
+    });
+    el.appendChild(row);
+  });
+}
+
+function syncFilterControls(){
+  const catSel = document.getElementById('catFilter');
+  const clearBtn = document.getElementById('clearFilter');
+  if (catSel) catSel.value = catFilter;
+  if (clearBtn) clearBtn.style.display = (catFilter !== 'all' || drcrFilterVal !== 'all' || searchTerm) ? 'inline-block' : 'none';
+}
+
+function populateFilterOptions(){
+  const catSel = document.getElementById('catFilter');
+
+  // Only categories actually used by this statement appear in the filter.
+  // CATEGORY_OPTIONS remains the source of truth for row editing.
+  const present = new Set(ALL_TXNS.map(t => t.category));
+  catSel.innerHTML = '<option value="all">All categories</option>';
+  CATEGORY_OPTIONS.forEach(c => {
+    if (present.has(c)){
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      catSel.appendChild(opt);
+    }
+  });
+
+  catSel.onchange = () => { catFilter = catSel.value; syncFilterControls(); renderCategoryBars(); renderTxnTable(); };
+
+  const drcrSel = document.getElementById('drcrFilter');
+  drcrSel.onchange = () => { drcrFilterVal = drcrSel.value; syncFilterControls(); renderTxnTable(); };
+
+  document.getElementById('clearFilter').onclick = () => {
+    catFilter = 'all'; drcrFilterVal = 'all'; searchTerm = '';
+    catSel.value = 'all'; drcrSel.value = 'all';
+    const searchEl = document.getElementById('searchBox');
+    if (searchEl) searchEl.value = '';
+    syncFilterControls(); renderCategoryBars(); renderTxnTable();
+  };
+
+  const searchBox = document.getElementById('searchBox');
+  searchBox.oninput = () => {
+    searchTerm = searchBox.value.trim().toLowerCase();
+    renderTxnTable();
+  };
+
+  document.getElementById('exportCsv').onclick = exportCsv;
+  const notionBtn = document.getElementById('saveToNotion');
+  if (notionBtn) notionBtn.onclick = saveToNotion;
+}
+
+async function generateStatementHash(){
+  const canonical = ALL_TXNS
+    .map(t => [t.date, t.id || '', t.remarks || '', Number(t.amount || 0).toFixed(2), t.drcr || '', Number(t.balance || 0).toFixed(2)].join('|'))
+    .sort()
+    .join('\n');
+  const payload = [STATEMENT_TYPE, canonical].join('\n');
+  const bytes = new TextEncoder().encode(payload);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function isoDate(d){
+  if (!d || !/^\d{2}-\d{2}-\d{4}$/.test(d)) return null;
+  const [dd, mm, yyyy] = d.split('-');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function buildNotionPayload(hash){
+  const chrono = chronological(ALL_TXNS);
+  const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
+  const credits = ALL_TXNS.filter(t => t.drcr === 'Cr');
+  const totalSpent = debits.reduce((s,t) => s + Number(t.amount || 0), 0);
+  const totalReceived = credits.reduce((s,t) => s + Number(t.amount || 0), 0);
+  const first = chrono[0]?.date || null;
+  const last = chrono[chrono.length - 1]?.date || null;
+  const statementName = `${STATEMENT_TYPE === 'credit-card' ? 'Credit Card' : 'Bank'} Statement${first && last ? ` · ${first} to ${last}` : ''}`;
+  return {
+    statement: {
+      name: statementName,
+      type: STATEMENT_TYPE === 'credit-card' ? 'Credit Card' : 'Bank',
+      startDate: isoDate(first),
+      endDate: isoDate(last),
+      totalSpent,
+      totalReceived,
+      netAmount: totalReceived - totalSpent,
+      transactionCount: ALL_TXNS.length,
+      statementHash: hash
+    },
+    transactions: ALL_TXNS.map((t, index) => ({
+      name: t.remarks || `Transaction ${index + 1}`,
+      date: isoDate(t.date),
+      transactionId: t.id ? String(t.id) : '',
+      remarks: t.remarks || '',
+      category: t.category || 'Uncategorized / Review',
+      type: t.drcr === 'Cr' ? 'Received' : 'Spent',
+      amount: Number(t.amount || 0),
+      balance: typeof t.balance === 'number' ? t.balance : null,
+      statementHash: hash
+    }))
+  };
+}
+
+async function saveToNotion(){
+  const button = document.getElementById('saveToNotion');
+  const status = document.getElementById('notionStatus');
+  if (!ALL_TXNS.length) return;
+
+  button.disabled = true;
+  status.className = 'notion-status';
+  try {
+    status.textContent = 'Preparing your statement…';
+    const hash = await generateStatementHash();
+    const payload = buildNotionPayload(hash);
+    status.textContent = `Checking duplicates and saving ${payload.transactions.length} transactions…`;
+
+    const response = await fetch('/api/save-to-notion', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Unable to save to Notion');
+
+    if (result.duplicate){
+      status.textContent = '⚠️ This statement has already been saved to Notion.';
+      status.className = 'notion-status error';
+    } else {
+      status.textContent = `✓ Saved successfully — ${result.savedTransactions ?? payload.transactions.length} transactions added to Notion.`;
+      status.className = 'notion-status success';
+    }
+  } catch (err) {
+    console.error(err);
+    status.textContent = `⚠️ ${err.message}. The Notion backend may not be configured yet.`;
+    status.className = 'notion-status error';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function exportCsv(){
+  const header = ['Date','Remarks','Category','Type','Amount','Balance'];
+  const rows = ALL_TXNS.map(t => [
+    t.date,
+    '"' + t.remarks.replace(/"/g,'""') + '"',
+    '"' + t.category.replace(/"/g,'""') + '"',
+    t.drcr === 'Cr' ? 'Credit' : 'Debit',
+    t.amount.toFixed(2),
+    (typeof t.balance === 'number' ? t.balance.toFixed(2) : '')
+  ].join(','));
+  const csv = [header.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'ledger-transactions.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const CATEGORY_OPTIONS = ['Investment (SIP)','Credit Card Payment','Refund / Reversal','Insurance','Rent','Travel & Transport','Fuel & Transport','Bank Transfer / Loan EMI','Shopping','Groceries','Dining','Health & Personal Care','Subscriptions & Software','Card Fees & Taxes','Wallet Load / Transfer','Recharge','Personal / UPI Payments','Money Received','Uncategorized / Review','Other'];
+
+function renderInsights(){
+  const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
+  const credits = ALL_TXNS.filter(t => t.drcr === 'Cr');
+
+  // ---------------- Spending ----------------
+  const merchantMap = {};
+  debits.forEach(t => {
+    const key = payeeLabel(t.remarks);
+    if (!merchantMap[key]) merchantMap[key] = { name:key, total:0, count:0 };
+    merchantMap[key].total += t.amount;
+    merchantMap[key].count += 1;
+  });
+
+  const merchants = Object.values(merchantMap)
+    .sort((a,b)=>b.total-a.total)
+    .slice(0,5);
+
+  const merchantEl = document.getElementById('topMerchants');
+  merchantEl.innerHTML = merchants.length ? merchants.map(m => `
+    <div class="merchant-row">
+      <div>
+        <div class="merchant-name" title="${m.name.replace(/"/g,'&quot;')}">${m.name}</div>
+        <div class="merchant-meta">${m.count} transaction${m.count===1?'':'s'}</div>
+      </div>
+      <div class="merchant-total insight-spending">−${fmt(m.total)}</div>
+    </div>`).join('') : '<div class="empty-filter">No debit transactions to analyze.</div>';
+
+  const largest = debits.slice().sort((a,b)=>b.amount-a.amount)[0];
+  const byDay = {};
+  debits.forEach(t => {
+    const day = parseDMY(t.date).toLocaleDateString('en-IN', {weekday:'long'});
+    byDay[day] = (byDay[day] || 0) + t.amount;
+  });
+  const busiest = Object.entries(byDay).sort((a,b)=>b[1]-a[1])[0];
+  const reviewCount = ALL_TXNS.filter(t => t.category === 'Uncategorized / Review').length;
+  const largestCategory = categoryTotals()[0];
+
+  const facts = [
+    largest ? {label:'Largest expense', value:fmt(largest.amount), detail:`${payeeLabel(largest.remarks)} · ${largest.date}`} : null,
+    busiest ? {label:'Highest-spend weekday', value:busiest[0], detail:fmt(busiest[1])+' spent across that weekday'} : null,
+    largestCategory ? {label:'Largest category', value:largestCategory[0], detail:fmt(largestCategory[1])+' total'} : null,
+    {label:'Needs review', value:String(reviewCount), detail:reviewCount ? 'Transactions still marked Uncategorized / Review' : 'Everything is currently categorized'}
+  ].filter(Boolean);
+
+  document.getElementById('insightFacts').innerHTML = facts.map(f => `
+    <div class="fact">
+      <div class="fact-label">${f.label}</div>
+      <div class="fact-value">${f.value}</div>
+      <div class="fact-detail">${f.detail}</div>
+    </div>`).join('');
+
+  // ---------------- Received ----------------
+  const sourceMap = {};
+  credits.forEach(t => {
+    const key = payeeLabel(t.remarks);
+    if (!sourceMap[key]) sourceMap[key] = { name:key, total:0, count:0 };
+    sourceMap[key].total += t.amount;
+    sourceMap[key].count += 1;
+  });
+
+  const sources = Object.values(sourceMap)
+    .sort((a,b)=>b.total-a.total)
+    .slice(0,5);
+
+  const sourceEl = document.getElementById('topCreditSources');
+  sourceEl.innerHTML = sources.length ? sources.map(s => `
+    <div class="merchant-row">
+      <div>
+        <div class="merchant-name" title="${s.name.replace(/"/g,'&quot;')}">${s.name}</div>
+        <div class="merchant-meta">${s.count} receipt${s.count===1?'':'s'}</div>
+      </div>
+      <div class="merchant-total insight-received">+${fmt(s.total)}</div>
+    </div>`).join('') : '<div class="empty-filter">No received transactions to analyze.</div>';
+
+  const largestReceipt = credits.slice().sort((a,b)=>b.amount-a.amount)[0];
+  const receivedByDay = {};
+  credits.forEach(t => {
+    const day = parseDMY(t.date).toLocaleDateString('en-IN', {weekday:'long'});
+    receivedByDay[day] = (receivedByDay[day] || 0) + t.amount;
+  });
+  const strongestReceivedDay = Object.entries(receivedByDay).sort((a,b)=>b[1]-a[1])[0];
+  const receivedSource = sources[0];
+  const receivedReviewCount = credits.filter(t => t.category === 'Uncategorized / Review').length;
+  const receivedFacts = [
+    largestReceipt ? {
+      label:'Largest receipt',
+      value:'+' + fmt(largestReceipt.amount),
+      detail:`${payeeLabel(largestReceipt.remarks)} · ${largestReceipt.date}`
+    } : null,
+    strongestReceivedDay ? {
+      label:'Highest-receipt weekday',
+      value:strongestReceivedDay[0],
+      detail:fmt(strongestReceivedDay[1])+' received across that weekday'
+    } : null,
+    receivedSource ? {
+      label:'Top receiving source',
+      value:receivedSource.name,
+      detail:'+' + fmt(receivedSource.total) + ' total'
+    } : null,
+    {
+      label:'Needs review',
+      value:String(receivedReviewCount),
+      detail:receivedReviewCount
+        ? 'Received transactions still marked Uncategorized / Review'
+        : 'Everything received is currently categorized'
+    }
+  ].filter(Boolean);
+
+  document.getElementById('receivedInsightFacts').innerHTML = receivedFacts.map(f => `
+    <div class="fact">
+      <div class="fact-label">${f.label}</div>
+      <div class="fact-value">${f.value}</div>
+      <div class="fact-detail">${f.detail}</div>
+    </div>`).join('');
+}
+
+// Group transactions that repeat with the same amount to (roughly) the
+// same payee three or more times — a decent proxy for subscriptions,
+// SIPs, EMIs, and regular bills without needing a merchant database.
+
+function renderPie(){
+  const totals = categoryTotals();
+  const ctx = document.getElementById('pieCanvas');
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (pieChart) pieChart.destroy();
+
+  const palette = ['#7A2E2E','#A9822F','#1B7A43','#4a5170','#1C2541','#B23A2E','#6b7a5e','#8a6b3a','#3a5a7a','#7a3a5a'];
+  pieChart = new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels:totals.map(t=>t[0]),
+      datasets:[{
+        data:totals.map(t=>t[1]),
+        backgroundColor:palette,
+        borderColor:'#FBFBF7',
+        borderWidth:2
+      }]
+    },
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{position:'bottom',labels:{font:{family:'Inter',size:11},color:'#1C2541',padding:14}},
+        tooltip:{callbacks:{label:(c)=>c.label+': '+fmt(c.raw)}}
+      }
+    }
+  });
+}
+
+function getBalanceSeries(){
+  const chrono = chronological(ALL_TXNS);
+
+  if (STATEMENT_TYPE === 'credit-card'){
+    // Credit-card rows intentionally have no statement balance per transaction.
+    // Reconstruct the outstanding balance from the opening balance:
+    // charges/debits increase what is owed; payments/credits reduce it.
+    let running = (typeof CC_PREVIOUS_BALANCE === 'number' && !Number.isNaN(CC_PREVIOUS_BALANCE))
+      ? CC_PREVIOUS_BALANCE
+      : 0;
+
+    const points = chrono.map(t => {
+      running += (t.drcr === 'Dr' ? t.amount : -t.amount);
+      return { date:t.date, balance:running };
+    });
+
+    return {
+      labels: points.map(p => p.date.slice(0,5)),
+      balances: points.map(p => p.balance)
+    };
+  }
+
+  return {
+    labels: chrono.map(t => t.date.slice(0,5)),
+    balances: chrono.map(t => t.balance)
+  };
+}
+
+function renderBalanceChart(){
+  const ctx = document.getElementById('balanceCanvas');
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (balanceChart) balanceChart.destroy();
+
+  const series = getBalanceSeries();
+  const subtitle = document.querySelector('#categoryChartBalance .card-sub');
+
+  if (subtitle){
+    subtitle.textContent = STATEMENT_TYPE === 'credit-card'
+      ? 'Reconstructed outstanding card balance from the opening balance and each charge or payment.'
+      : 'Running balance across the statement period.';
+  }
+
+  balanceChart = new Chart(ctx,{
+    type:'line',
+    data:{
+      labels:series.labels,
+      datasets:[{
+        data:series.balances,
+        borderColor:'#7A2E2E',
+        backgroundColor:'rgba(122,46,46,0.08)',
+        borderWidth:2,
+        pointRadius:0,
+        pointHoverRadius:4,
+        tension:0,
+        fill:true
+      }]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:true,
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            label:(c)=> STATEMENT_TYPE === 'credit-card'
+              ? 'Outstanding: ' + fmt(c.raw)
+              : 'Balance: ' + fmt(c.raw)
+          }
+        }
+      },
+      scales:{
+        x:{
+          ticks:{maxTicksLimit:8,font:{family:'IBM Plex Mono',size:10},color:'#4a5170'},
+          grid:{display:false}
+        },
+        y:{
+          ticks:{
+            font:{family:'IBM Plex Mono',size:10},
+            color:'#4a5170',
+            callback:(v)=>'₹'+Number(v).toLocaleString('en-IN')
+          },
+          grid:{color:'#d9dccd'}
+        }
+      }
+    }
+  });
+}
+function detectRecurring(){
+  const groups = {};
+  ALL_TXNS.forEach(t => {
+    const normalized = t.remarks.toLowerCase().replace(/\d{4,}/g, '').replace(/\s+/g,' ').trim();
+    const key = normalized + '|' + t.amount.toFixed(2) + '|' + t.drcr;
+    if (!groups[key]) groups[key] = { txns: [], remarks: t.remarks, amount: t.amount, drcr: t.drcr };
+    groups[key].txns.push(t);
+  });
+  return Object.values(groups)
+    .filter(g => g.txns.length >= 3)
+    .sort((a,b) =>
+      b.txns.length - a.txns.length ||
+      (b.amount*b.txns.length) - (a.amount*a.txns.length)
+    );
+}
+
+function payeeLabel(remarks){
+  // Pull a human-ish name out of the UPI remarks string, e.g.
+  // "UPIAR/.../DR/ZARIVAUL/YESB/paytm-..." -> "ZARIVAUL"
+  const parts = remarks.split('/').map(s => s.trim()).filter(Boolean);
+  const skip = new Set(['UPIAR','UPIAB','DR','CR','IMPSAB','TRTR']);
+  const named = parts.find(p => !skip.has(p.toUpperCase()) && !/^\d+$/.test(p) && p.length > 1 && !/^[A-Z]{4}\d*$/.test(p));
+  return named || remarks.slice(0, 24);
+}
+
+function renderRecurring(){
+  const groups = detectRecurring();
+  const el = document.getElementById('recurringInsightList');
+  if (!el) return;
+
+  if (groups.length === 0){
+    el.innerHTML = '<div class="empty-filter">No recurring spending patterns detected.</div>';
+    return;
+  }
+
+  el.innerHTML = '';
+  groups.slice(0, 8).forEach(g => {
+    const chrono = chronological(g.txns);
+    const spanDays = Math.max(
+      1,
+      Math.round((parseDMY(chrono[chrono.length-1].date) - parseDMY(chrono[0].date)) / 86400000)
+    );
+    const everyN = Math.round(spanDays / (g.txns.length - 1)) || 1;
+
+    const row = document.createElement('div');
+    row.className = 'recur-item';
+    row.innerHTML = `
+      <div class="recur-payee">
+        <div class="name">${payeeLabel(g.remarks)}</div>
+        <div class="meta">${g.txns.length}× this period · roughly every ${everyN} day${everyN===1?'':'s'}</div>
+      </div>
+      <div class="recur-amt">
+        <div class="per num ${g.drcr==='Cr'?'cr':'dr'}">${g.drcr==='Cr'?'+':'−'}${fmt(g.amount)}</div>
+        <div class="tot">${fmt(g.amount * g.txns.length)} total</div>
+      </div>`;
+    el.appendChild(row);
+  });
+}
+
+function renderTxnTable(){
+  const tbody = document.getElementById('txnBody');
+  tbody.innerHTML = '';
+
+  const filtered = ALL_TXNS
+    .map((t, idx) => ({...t, idx}))
+    .filter(t => (catFilter === 'all' || t.category === catFilter))
+    .filter(t => (drcrFilterVal === 'all' || t.drcr === drcrFilterVal))
+    .filter(t => (!searchTerm ||
+      t.remarks.toLowerCase().includes(searchTerm) ||
+      t.category.toLowerCase().includes(searchTerm) ||
+      t.date.includes(searchTerm) ||
+      (t.id && String(t.id).toLowerCase().includes(searchTerm))));
+
+  let countLabel = filtered.length + ' of ' + ALL_TXNS.length + ' rows';
+  if (catFilter !== 'all' || drcrFilterVal !== 'all' || searchTerm){
+    const sum = filtered.reduce((s,t)=>s+t.amount,0);
+    countLabel += ' · total ' + fmt(sum);
+  }
+  document.getElementById('txnCount').textContent = countLabel;
+
+  if (filtered.length === 0){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="4" class="empty-filter">No transactions match this filter.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  filtered.forEach(t => {
+    const idx = t.idx;
+    const tr = document.createElement('tr');
+    const optsHtml = CATEGORY_OPTIONS.map(c => `<option value="${c}" ${c===t.category?'selected':''}>${c}</option>`).join('');
+    tr.innerHTML = `
+      <td class="txn-row-date">${t.date}</td>
+      <td class="txn-row-remark" title="${t.remarks}">${t.remarks}</td>
+      <td><select class="cat-select" data-idx="${idx}">${optsHtml}</select></td>
+      <td class="amt"><span class="num ${t.drcr==='Cr'?'cr':'dr'}">${t.drcr==='Cr'?'+':'−'}${fmt(t.amount)}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll('.cat-select').forEach(sel => {
+    sel.addEventListener('change', e => {
+      const idx = +e.target.dataset.idx;
+      ALL_TXNS[idx].category = e.target.value;
+      rememberCategory(ALL_TXNS[idx], ALL_TXNS[idx].category);
+      populateFilterOptions_refresh();
+      renderCategoryBars();
+      renderPie();
+      renderBalanceChart();
+      renderTxnTable();
+    });
+  });
+}
+
+function populateFilterOptions_refresh(){
+  const catSel = document.getElementById('catFilter');
+  const current = catFilter;
+  const present = new Set(ALL_TXNS.map(t => t.category));
+  catSel.innerHTML = '<option value="all">All categories</option>';
+  CATEGORY_OPTIONS.forEach(c => {
+    if (present.has(c)){
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      catSel.appendChild(opt);
+    }
+  });
+  catFilter = present.has(current) ? current : 'all';
+  catSel.value = catFilter;
+  syncFilterControls();
+}
+
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
