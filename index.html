@@ -1250,41 +1250,30 @@ function isoDate(d){
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function buildNotionPayload(hash){
-  const chrono = chronological(ALL_TXNS);
-  const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
-  const credits = ALL_TXNS.filter(t => t.drcr === 'Cr');
-  const totalSpent = debits.reduce((s,t) => s + Number(t.amount || 0), 0);
-  const totalReceived = credits.reduce((s,t) => s + Number(t.amount || 0), 0);
-  const first = chrono[0]?.date || null;
-  const last = chrono[chrono.length - 1]?.date || null;
-  const statementName = `${STATEMENT_TYPE === 'credit-card' ? 'Credit Card' : 'Bank'} Statement${first && last ? ` · ${first} to ${last}` : ''}`;
-  return {
-    statement: {
-      name: statementName,
-      type: STATEMENT_TYPE === 'credit-card' ? 'Credit Card' : 'Bank',
-      startDate: isoDate(first),
-      endDate: isoDate(last),
-      totalSpent,
-      totalReceived,
-      netAmount: totalReceived - totalSpent,
-      transactionCount: ALL_TXNS.length,
-      statementHash: hash
-    },
-    transactions: ALL_TXNS.map((t, index) => ({
-      name: t.remarks || `Transaction ${index + 1}`,
-      date: isoDate(t.date),
-      transactionId: t.id ? String(t.id) : '',
-      remarks: t.remarks || '',
-      category: t.category || 'Uncategorized / Review',
-      type: t.drcr === 'Cr' ? 'Received' : 'Spent',
-      amount: Number(t.amount || 0),
-      balance: typeof t.balance === 'number' ? t.balance : null,
-      statementHash: hash
-    }))
-  };
+function cleanMerchantForNotion(value){
+  const raw = String(value || '').trim();
+  const marker = raw.match(/\/(?:DR|CR)\/(.+)$/i);
+  return marker?.[1]?.trim() || raw;
 }
 
+function buildNotionPayload(){
+  return {
+    transactions: ALL_TXNS.map((t, index) => {
+      const raw = t.remarks || `Transaction ${index + 1}`;
+      return {
+        name: cleanMerchantForNotion(raw),
+        rawName: raw,
+        date: isoDate(t.date),
+        transactionId: t.id ? String(t.id) : '',
+        remarks: raw,
+        category: t.category || 'Uncategorized / Review',
+        type: t.drcr === 'Cr' ? 'Received' : 'Spent',
+        amount: Number(t.amount || 0),
+        balance: typeof t.balance === 'number' ? t.balance : null
+      };
+    })
+  };
+}
 async function saveToNotion(){
   const button = document.getElementById('saveToNotion');
   const label = button.querySelector('.save-btn-label');
@@ -1298,8 +1287,7 @@ async function saveToNotion(){
   status.className = 'notion-status';
   try {
     status.textContent = 'Preparing your statement…';
-    const hash = await generateStatementHash();
-    const payload = buildNotionPayload(hash);
+    const payload = buildNotionPayload();
     status.textContent = `Saving ${payload.transactions.length} transactions to Notion… this can take a little while for large statements.`;
 
     const response = await fetch('/api/save-to-notion', {
@@ -1311,10 +1299,11 @@ async function saveToNotion(){
     if (!response.ok) throw new Error(result.error || 'Unable to save to Notion');
 
     if (result.duplicate){
-      status.textContent = '⚠️ This statement has already been saved to Notion.';
-      status.className = 'notion-status error';
+      status.textContent = `✓ No new transactions were added — all ${result.skippedDuplicates ?? payload.transactions.length} were already in Notion.`;
+      status.className = 'notion-status success';
     } else {
-      status.textContent = `✓ Saved successfully — ${result.savedTransactions ?? payload.transactions.length} transactions added to Notion.`;
+      const skipped = Number(result.skippedDuplicates || 0);
+      status.textContent = `✓ Saved successfully — ${result.savedTransactions ?? payload.transactions.length} new transactions added${skipped ? `, ${skipped} duplicate${skipped === 1 ? '' : 's'} skipped` : ''}.`;
       status.className = 'notion-status success';
     }
   } catch (err) {

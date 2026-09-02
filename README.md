@@ -1,20 +1,27 @@
-# Ledger → Notion
+# Ledger → Budget & Finance Tracker
 
-## Deploy on Vercel
+This version saves directly into your existing Notion databases:
 
-Set these Environment Variables:
+- Expenses
+- Incomes
+- Month Classification (for relations)
+- Budget (for expense category relations)
+
+## Vercel Environment Variables
 
 - `NOTION_TOKEN`
-- `NOTION_STATEMENTS_DATA_SOURCE_ID`
 - `NOTION_EXPENSES_DATA_SOURCE_ID`
 - `NOTION_INCOMES_DATA_SOURCE_ID`
 - `NOTION_MONTH_DATA_SOURCE_ID`
 - `NOTION_BUDGET_DATA_SOURCE_ID`
 
-## Changes in this version
+`Ledger Statements` and `Ledger Transactions` are no longer used by the backend.
 
-- Automatic retry/backoff for Notion HTTP 429 rate limits
-- 420ms pacing between transaction writes
-- Save button shows a loading spinner and cannot be clicked twice while saving
-- Export CSV removed
-- Statement record is created only after all transaction writes finish
+## Improvements
+
+- Direct save to Expenses and Incomes only
+- Transaction-level duplicate prevention, including safe retry after partial saves
+- UPI narration cleanup: `UPIAR/.../DR/ZARIVAUL/YESB/paytm-14676198` becomes `ZARIVAUL/YESB/paytm-14676198`
+- Save button loading state retained
+- Notion rate-limit retry retained
+- CSV export removed

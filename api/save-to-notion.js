@@ -2,11 +2,7 @@ const NOTION_VERSION = '2025-09-03';
 const NOTION_BASE = 'https://api.notion.com/v1';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const env = (name, fallback) => process.env[name] || process.env[fallback];
-
-function isoMonth(date) {
-  return String(date || '').slice(0, 7);
-}
+const env = (name, fallback) => process.env[name] || (fallback ? process.env[fallback] : undefined);
 
 async function notion(path, options = {}, attempt = 0) {
   const token = process.env.NOTION_TOKEN;
@@ -24,7 +20,7 @@ async function notion(path, options = {}, attempt = 0) {
 
   if (response.status === 429 && attempt < 8) {
     const retryAfter = Number(response.headers.get('retry-after') || 0);
-    const wait = retryAfter > 0 ? retryAfter * 1000 : Math.min(15000, 1200 * (2 ** attempt));
+    const wait = retryAfter > 0 ? retryAfter * 1000 : Math.min(12000, 900 * (2 ** attempt));
     await sleep(wait + 250);
     return notion(path, options, attempt + 1);
   }
@@ -46,6 +42,17 @@ async function queryDataSource(dataSourceId, body = {}) {
   });
 }
 
+async function queryAll(dataSourceId) {
+  const results = [];
+  let cursor;
+  do {
+    const page = await queryDataSource(dataSourceId, cursor ? { start_cursor: cursor } : {});
+    results.push(...(page.results || []));
+    cursor = page.has_more ? page.next_cursor : null;
+  } while (cursor);
+  return results;
+}
+
 async function createPage(dataSourceId, properties) {
   return notion('/pages', {
     method: 'POST',
@@ -57,12 +64,55 @@ function text(value) { return [{ type: 'text', text: { content: String(value ?? 
 function title(value) { return [{ type: 'text', text: { content: String(value ?? '').slice(0, 1900) } }]; }
 function relation(id) { return id ? [{ id }] : []; }
 
+function cleanMerchant(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  // Example: UPIAR/621300517797/DR/ZARIVAUL/YESB/paytm-14676198
+  //          -> ZARIVAUL/YESB/paytm-14676198
+  const marker = raw.match(/\/(?:DR|CR)\/(.+)$/i);
+  if (marker?.[1]) return marker[1].trim();
+  return raw;
+}
+
 function getPlainTitle(page) {
   const props = page.properties || {};
   for (const p of Object.values(props)) {
-    if (p.type === 'title' && Array.isArray(p.title)) return p.title.map(x => x.plain_text || x.text?.content || '').join('');
+    if (p.type === 'title' && Array.isArray(p.title)) {
+      return p.title.map(x => x.plain_text || x.text?.content || '').join('');
+    }
   }
   return '';
+}
+
+function getDateValue(page, propertyName = 'Date') {
+  const p = page.properties?.[propertyName];
+  return p?.date?.start || '';
+}
+
+function getNumberValue(page, propertyName = 'Amount') {
+  const n = page.properties?.[propertyName]?.number;
+  return Number.isFinite(n) ? Number(n) : 0;
+}
+
+function txKey(date, amount, name) {
+  const d = String(date || '').slice(0, 10);
+  const a = Number(amount || 0).toFixed(2);
+  const n = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return `${d}|${a}|${n}`;
+}
+
+function buildExistingKeySet(pages) {
+  const set = new Set();
+  for (const page of pages) {
+    const name = getPlainTitle(page);
+    const date = getDateValue(page);
+    const amount = getNumberValue(page);
+    if (name) {
+      set.add(txKey(date, amount, name));
+      set.add(txKey(date, amount, cleanMerchant(name)));
+    }
+  }
+  return set;
 }
 
 function monthCandidates(date) {
@@ -75,73 +125,78 @@ function monthCandidates(date) {
   return [`${month} ${year}`, `${short} ${year}`, `${year}-${String(d.getMonth()+1).padStart(2,'0')}`].map(x => x.toLowerCase());
 }
 
-async function findByTitleContains(dataSourceId, candidates) {
-  const result = await queryDataSource(dataSourceId);
-  const lower = candidates.map(x => x.toLowerCase());
-  return result.results?.find(page => {
-    const name = getPlainTitle(page).toLowerCase();
-    return lower.some(c => name === c || name.includes(c));
-  }) || null;
-}
-
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const statementsId = env('NOTION_STATEMENTS_DATA_SOURCE_ID', 'NOTION_STATEMENTS_DATABASE_ID');
   const expensesId = env('NOTION_EXPENSES_DATA_SOURCE_ID', 'NOTION_EXPENSES_DATABASE_ID');
   const incomesId = env('NOTION_INCOMES_DATA_SOURCE_ID', 'NOTION_INCOMES_DATABASE_ID');
   const monthId = env('NOTION_MONTH_DATA_SOURCE_ID', 'NOTION_MONTH_DATABASE_ID');
   const budgetId = env('NOTION_BUDGET_DATA_SOURCE_ID', 'NOTION_BUDGET_DATABASE_ID');
 
-  if (!statementsId || !expensesId || !incomesId) {
-    return res.status(500).json({ error: 'Required Notion data source IDs are missing in Vercel' });
+  if (!expensesId || !incomesId) {
+    return res.status(500).json({ error: 'Expenses or Incomes Notion data source ID is missing in Vercel' });
   }
 
   try {
-    const { statement, transactions = [] } = req.body || {};
-    if (!statement?.statementHash) return res.status(400).json({ error: 'Invalid statement payload' });
+    const { transactions = [] } = req.body || {};
+    if (!Array.isArray(transactions) || !transactions.length) {
+      return res.status(400).json({ error: 'No transactions to save' });
+    }
 
-    // Duplicate check before any writes.
-    const existing = await queryDataSource(statementsId);
-    const duplicate = existing.results?.find(page => {
-      const p = page.properties?.['Statement Hash'];
-      const value = (p?.rich_text || []).map(x => x.plain_text || '').join('');
-      return value === statement.statementHash;
-    });
-    if (duplicate) return res.status(200).json({ duplicate: true, savedTransactions: 0 });
-
-    // Load relation targets once. This avoids making extra Notion requests for every transaction.
-    const [monthPages, budgetPages] = await Promise.all([
-      monthId ? queryDataSource(monthId) : Promise.resolve({ results: [] }),
-      budgetId ? queryDataSource(budgetId) : Promise.resolve({ results: [] })
+    // Load existing transactions once. This makes retries idempotent: if a previous save
+    // partially succeeded, only the missing transactions are created on the next attempt.
+    const [existingExpenses, existingIncomes, monthPages, budgetPages] = await Promise.all([
+      queryAll(expensesId),
+      queryAll(incomesId),
+      monthId ? queryAll(monthId) : Promise.resolve([]),
+      budgetId ? queryAll(budgetId) : Promise.resolve([])
     ]);
+
+    const expenseKeys = buildExistingKeySet(existingExpenses);
+    const incomeKeys = buildExistingKeySet(existingIncomes);
+
     const findMonthPage = date => {
       const candidates = monthCandidates(date);
-      return monthPages.results?.find(page => {
+      return monthPages.find(page => {
         const name = getPlainTitle(page).toLowerCase();
         return candidates.some(c => name === c || name.includes(c));
       }) || null;
     };
+
     const findBudgetPage = category => {
       const needle = String(category || '').trim().toLowerCase();
       if (!needle) return null;
-      return budgetPages.results?.find(page => getPlainTitle(page).trim().toLowerCase() === needle) || null;
+      return budgetPages.find(page => getPlainTitle(page).trim().toLowerCase() === needle) || null;
     };
 
     let savedTransactions = 0;
-    // One write roughly every 400ms keeps us safely under Notion's average rate limit.
+    let skippedDuplicates = 0;
+
     for (const tx of transactions) {
       const isIncome = tx.type === 'Received';
       const targetId = isIncome ? incomesId : expensesId;
+      const existingKeys = isIncome ? incomeKeys : expenseKeys;
+      const rawName = String(tx.name || tx.remarks || (isIncome ? 'Income' : 'Expense'));
+      const displayName = cleanMerchant(rawName) || rawName;
+      const cleanKey = txKey(tx.date, tx.amount, displayName);
+      const rawKey = txKey(tx.date, tx.amount, rawName);
+
+      if (existingKeys.has(cleanKey) || existingKeys.has(rawKey)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+
       const props = isIncome ? {
-        'Income': { title: title(tx.name || tx.remarks || 'Income') },
+        'Income': { title: title(displayName) },
         'Date': { date: tx.date ? { start: tx.date } : null },
         'Amount': { number: Number(tx.amount || 0) },
-        'Type': { select: { name: /refund/i.test(tx.category || tx.remarks || '') ? 'Refund' : 'Other' } }
+        'Type': { select: { name: /refund/i.test(tx.category || tx.remarks || '') ? 'Refund' : 'Other' } },
+        'Pay': { multi_select: [{ name: 'Bank' }] }
       } : {
-        'Expense': { title: title(tx.name || tx.remarks || 'Expense') },
+        'Expense': { title: title(displayName) },
         'Date': { date: tx.date ? { start: tx.date } : null },
-        'Amount': { number: Number(tx.amount || 0) }
+        'Amount': { number: Number(tx.amount || 0) },
+        'Pay': { multi_select: [{ name: 'Bank' }] }
       };
 
       const monthPage = findMonthPage(tx.date);
@@ -153,24 +208,18 @@ async function handler(req, res) {
       }
 
       await createPage(targetId, props);
+      existingKeys.add(cleanKey);
+      existingKeys.add(rawKey);
       savedTransactions += 1;
-      await sleep(420);
+      // Gentle pacing; automatic 429 retry above handles temporary bursts safely.
+      await sleep(340);
     }
 
-    // Create the statement record last, only after all transaction writes succeed.
-    await createPage(statementsId, {
-      'Statement Name': { title: title(statement.name || 'Ledger Statement') },
-      'Statement Type': { select: { name: statement.type || 'Bank' } },
-      'Start Date': { date: statement.startDate ? { start: statement.startDate } : null },
-      'End Date': { date: statement.endDate ? { start: statement.endDate } : null },
-      'Total Spent': { number: Number(statement.totalSpent || 0) },
-      'Total Received': { number: Number(statement.totalReceived || 0) },
-      'Net Amount': { number: Number(statement.netAmount || 0) },
-      'Transaction Count': { number: Number(statement.transactionCount || savedTransactions) },
-      'Statement Hash': { rich_text: text(statement.statementHash) }
+    return res.status(200).json({
+      savedTransactions,
+      skippedDuplicates,
+      duplicate: savedTransactions === 0 && skippedDuplicates > 0
     });
-
-    return res.status(200).json({ duplicate: false, savedTransactions });
   } catch (error) {
     console.error('Save to Notion error:', error);
     const status = error.status === 429 ? 429 : 500;
