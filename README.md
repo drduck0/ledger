@@ -25,3 +25,7 @@ This version saves directly into your existing Notion databases:
 - Save button loading state retained
 - Notion rate-limit retry retained
 - CSV export removed
+
+
+## Duplicate protection update
+This version uses the bank statement Transaction ID as the primary duplicate key. It also handles older Notion records using occurrence-aware matching, so legitimate transactions with the same date, merchant and amount are not incorrectly dropped.

@@ -53,21 +53,22 @@ async function queryAll(dataSourceId) {
   return results;
 }
 
-async function createPage(dataSourceId, properties) {
+async function createPage(dataSourceId, properties, icon) {
   try {
     return await notion('/pages', {
       method: 'POST',
-      body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties })
+      body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties, ...(icon ? { icon: { type: 'emoji', emoji: icon } } : {}) })
     });
   } catch (error) {
     // If the Category property has not yet been added in Notion, keep the
     // transaction save working rather than failing the whole statement.
-    if (properties.Category && /Category|property/i.test(String(error.message || ''))) {
+    if (/property|schema|does not exist|not found/i.test(String(error.message || ''))) {
       const retryProperties = { ...properties };
       delete retryProperties.Category;
+      delete retryProperties['Transaction ID'];
       return notion('/pages', {
         method: 'POST',
-        body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties: retryProperties })
+        body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties: retryProperties, ...(icon ? { icon: { type: 'emoji', emoji: icon } } : {}) })
       });
     }
     throw error;
@@ -108,6 +109,14 @@ function getNumberValue(page, propertyName = 'Amount') {
   return Number.isFinite(n) ? Number(n) : 0;
 }
 
+function getRichTextValue(page, propertyName = 'Transaction ID') {
+  const p = page.properties?.[propertyName];
+  const parts = p?.rich_text || p?.title || [];
+  return Array.isArray(parts)
+    ? parts.map(x => x.plain_text || x.text?.content || '').join('').trim()
+    : '';
+}
+
 function txKey(date, amount, name) {
   const d = String(date || '').slice(0, 10);
   const a = Number(amount || 0).toFixed(2);
@@ -141,18 +150,41 @@ function budgetCategoryCandidates(category) {
   return BUDGET_CATEGORY_ALIASES[canonical] || [canonical];
 }
 
-function buildExistingKeySet(pages) {
-  const set = new Set();
+function buildExistingState(pages) {
+  const transactionIds = new Set();
+  const legacyCounts = new Map();
+
+  const addLegacy = key => legacyCounts.set(key, (legacyCounts.get(key) || 0) + 1);
+
   for (const page of pages) {
+    const id = getRichTextValue(page, 'Transaction ID');
+    if (id) transactionIds.add(id);
+
     const name = getPlainTitle(page);
     const date = getDateValue(page);
     const amount = getNumberValue(page);
     if (name) {
-      set.add(txKey(date, amount, name));
-      set.add(txKey(date, amount, cleanMerchant(name)));
+      addLegacy(txKey(date, amount, name));
+      const cleaned = cleanMerchant(name);
+      if (cleaned !== name) addLegacy(txKey(date, amount, cleaned));
     }
   }
-  return set;
+  return { transactionIds, legacyCounts };
+}
+
+
+function iconForTransaction(tx, isIncome) {
+  if (isIncome) return '💰';
+  const category = String(tx.category || '').trim().toLowerCase();
+  const icons = {
+    'food & dining': '🍔', groceries: '🛒', shopping: '🛍️',
+    'travel & transport': '✈️', petrol: '⛽', recharge: '📱',
+    'bills & subscriptions': '🧾', 'health & personal': '❤️',
+    'financial payments': '🏦', 'credit card payment': '💳',
+    investments: '📈', transfers: '🔄', entertainment: '🎬',
+    rent: '🏠', 'other / review': '❓'
+  };
+  return icons[category] || '💸';
 }
 
 function monthCandidates(date) {
@@ -193,8 +225,8 @@ async function handler(req, res) {
       budgetId ? queryAll(budgetId) : Promise.resolve([])
     ]);
 
-    const expenseKeys = buildExistingKeySet(existingExpenses);
-    const incomeKeys = buildExistingKeySet(existingIncomes);
+    const expenseState = buildExistingState(existingExpenses);
+    const incomeState = buildExistingState(existingIncomes);
 
     const findMonthPage = date => {
       const candidates = monthCandidates(date);
@@ -217,13 +249,33 @@ async function handler(req, res) {
     for (const tx of transactions) {
       const isIncome = tx.type === 'Received';
       const targetId = isIncome ? incomesId : expensesId;
-      const existingKeys = isIncome ? incomeKeys : expenseKeys;
-      const rawName = String(tx.name || tx.remarks || (isIncome ? 'Income' : 'Expense'));
+      const state = isIncome ? incomeState : expenseState;
+      const rawName = String(tx.name || tx.remarks || tx.rawName || (isIncome ? 'Income' : 'Expense'));
       const displayName = cleanMerchant(rawName) || rawName;
       const cleanKey = txKey(tx.date, tx.amount, displayName);
       const rawKey = txKey(tx.date, tx.amount, rawName);
+      const transactionId = String(tx.transactionId || tx.id || '').trim();
 
-      if (existingKeys.has(cleanKey) || existingKeys.has(rawKey)) {
+      // Primary duplicate key: the bank's own Transaction ID. This allows two
+      // legitimate same-day transactions with the same merchant and amount.
+      if (transactionId && state.transactionIds.has(transactionId)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+
+      // Backward-compatible migration for records saved before Transaction ID
+      // existed. Treat legacy records as a COUNT, not a boolean set. Therefore
+      // if the statement contains two identical-looking transactions and Notion
+      // contains only one old record, exactly one additional transaction is saved.
+      const legacyMatchKey = state.legacyCounts.has(cleanKey) ? cleanKey : rawKey;
+      const legacyCount = state.legacyCounts.get(legacyMatchKey) || 0;
+      if (!transactionId && legacyCount > 0) {
+        state.legacyCounts.set(legacyMatchKey, legacyCount - 1);
+        skippedDuplicates += 1;
+        continue;
+      }
+      if (transactionId && !state.transactionIds.size && legacyCount > 0) {
+        state.legacyCounts.set(legacyMatchKey, legacyCount - 1);
         skippedDuplicates += 1;
         continue;
       }
@@ -234,12 +286,14 @@ async function handler(req, res) {
         'Amount': { number: Number(tx.amount || 0) },
         'Type': { select: { name: /refund/i.test(tx.category || tx.remarks || '') ? 'Refund' : 'Other' } },
         'Pay': { multi_select: [{ name: 'Bank' }] },
+        'Transaction ID': { rich_text: text(transactionId) },
         ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Income / Received') } } : {})
       } : {
         'Expense': { title: title(displayName) },
         'Date': { date: tx.date ? { start: tx.date } : null },
         'Amount': { number: Number(tx.amount || 0) },
         'Pay': { multi_select: [{ name: 'Bank' }] },
+        'Transaction ID': { rich_text: text(transactionId) },
         ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Other / Review') } } : {})
       };
 
@@ -251,9 +305,10 @@ async function handler(req, res) {
         if (budgetPage) props['Budget'] = { relation: relation(budgetPage.id) };
       }
 
-      await createPage(targetId, props);
-      existingKeys.add(cleanKey);
-      existingKeys.add(rawKey);
+      await createPage(targetId, props, iconForTransaction(tx, isIncome));
+      if (transactionId) state.transactionIds.add(transactionId);
+      state.legacyCounts.set(cleanKey, (state.legacyCounts.get(cleanKey) || 0) + 1);
+      if (rawKey !== cleanKey) state.legacyCounts.set(rawKey, (state.legacyCounts.get(rawKey) || 0) + 1);
       savedTransactions += 1;
       // Gentle pacing; automatic 429 retry above handles temporary bursts safely.
       await sleep(340);
