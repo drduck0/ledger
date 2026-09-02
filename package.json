@@ -1,1 +1,6 @@
-{"name":"ledger-notion-vercel","private":true,"version":"1.0.0","type":"module","engines":{"node":">=20"}}
+{
+  "name": "ledger-budget-finance-tracker",
+  "version": "1.2.0",
+  "private": true,
+  "engines": { "node": "22.x" }
+}

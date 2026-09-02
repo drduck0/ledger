@@ -1,8 +1,8 @@
-# Ledger → Budget & Finance Tracker (Vercel)
+# Ledger → Notion
 
-## Environment Variables
+## Deploy on Vercel
 
-Use these exact names:
+Set these Environment Variables:
 
 - `NOTION_TOKEN`
 - `NOTION_STATEMENTS_DATA_SOURCE_ID`
@@ -11,17 +11,10 @@ Use these exact names:
 - `NOTION_MONTH_DATA_SOURCE_ID`
 - `NOTION_BUDGET_DATA_SOURCE_ID`
 
-The backend uses Notion's current Data Sources API.
+## Changes in this version
 
-For compatibility, the backend also accepts the older `*_DATABASE_ID` names, but the `*_DATA_SOURCE_ID` names are recommended.
-
-## Important
-
-Share every relevant Notion database/data source with the same Notion integration used by `NOTION_TOKEN`.
-
-The backend:
-- prevents duplicate statements using `Statement Hash`
-- sends spending to Expenses
-- sends received transactions to Incomes
-- attempts to link each transaction to Month Classification
-- attempts to link expenses to Budget categories
+- Automatic retry/backoff for Notion HTTP 429 rate limits
+- 420ms pacing between transaction writes
+- Save button shows a loading spinner and cannot be clicked twice while saving
+- Export CSV removed
+- Statement record is created only after all transaction writes finish

@@ -422,7 +422,10 @@
     border:0;border-radius:8px;padding:8px 12px;margin-left:10px;cursor:pointer;
     background:#111;color:#fff;font-weight:700;font-size:12px;
   }
-  .notion-save-btn:disabled{opacity:.6;cursor:wait;}
+  .notion-save-btn:disabled{opacity:.72;cursor:wait;}
+  .notion-save-btn .save-spinner{display:none;width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:notionSpin .7s linear infinite;vertical-align:-2px;margin-right:6px;}
+  .notion-save-btn.is-saving .save-spinner{display:inline-block;}
+  @keyframes notionSpin{to{transform:rotate(360deg)}}
   .notion-status{font-size:12px;margin:10px 0;text-align:center;color:var(--ink-soft);}
   .notion-status.success{color:#16803c;}
   .notion-status.error{color:#b42318;}
@@ -548,8 +551,8 @@
           <option value="Cr">Received only</option>
         </select>
         <span class="reset-link" id="clearFilter" style="display:none;">✕ Clear filter</span>
-        <span class="reset-link" id="exportCsv" style="margin-left:auto;">⤓ Export CSV</span>
-        <button type="button" id="saveToNotion" class="notion-save-btn">☁ Save to Notion</button>
+        <div style="margin-left:auto;"></div>
+        <button type="button" id="saveToNotion" class="notion-save-btn"><span class="save-spinner" aria-hidden="true"></span><span class="save-btn-label">☁ Save to Notion</span></button>
       </div>
       <div style="overflow-x:auto;">
         <table>
@@ -1226,7 +1229,6 @@ function populateFilterOptions(){
     renderTxnTable();
   };
 
-  document.getElementById('exportCsv').onclick = exportCsv;
   const notionBtn = document.getElementById('saveToNotion');
   if (notionBtn) notionBtn.onclick = saveToNotion;
 }
@@ -1285,16 +1287,20 @@ function buildNotionPayload(hash){
 
 async function saveToNotion(){
   const button = document.getElementById('saveToNotion');
+  const label = button.querySelector('.save-btn-label');
   const status = document.getElementById('notionStatus');
   if (!ALL_TXNS.length) return;
 
+  const originalLabel = label.textContent;
   button.disabled = true;
+  button.classList.add('is-saving');
+  label.textContent = 'Saving…';
   status.className = 'notion-status';
   try {
     status.textContent = 'Preparing your statement…';
     const hash = await generateStatementHash();
     const payload = buildNotionPayload(hash);
-    status.textContent = `Checking duplicates and saving ${payload.transactions.length} transactions…`;
+    status.textContent = `Saving ${payload.transactions.length} transactions to Notion… this can take a little while for large statements.`;
 
     const response = await fetch('/api/save-to-notion', {
       method: 'POST',
@@ -1313,33 +1319,13 @@ async function saveToNotion(){
     }
   } catch (err) {
     console.error(err);
-    status.textContent = `⚠️ ${err.message}. The Notion backend may not be configured yet.`;
+    status.textContent = `⚠️ ${err.message}`;
     status.className = 'notion-status error';
   } finally {
     button.disabled = false;
+    button.classList.remove('is-saving');
+    label.textContent = originalLabel;
   }
-}
-
-function exportCsv(){
-  const header = ['Date','Remarks','Category','Type','Amount','Balance'];
-  const rows = ALL_TXNS.map(t => [
-    t.date,
-    '"' + t.remarks.replace(/"/g,'""') + '"',
-    '"' + t.category.replace(/"/g,'""') + '"',
-    t.drcr === 'Cr' ? 'Credit' : 'Debit',
-    t.amount.toFixed(2),
-    (typeof t.balance === 'number' ? t.balance.toFixed(2) : '')
-  ].join(','));
-  const csv = [header.join(','), ...rows].join('\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'ledger-transactions.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 const CATEGORY_OPTIONS = ['Investment (SIP)','Credit Card Payment','Refund / Reversal','Insurance','Rent','Travel & Transport','Fuel & Transport','Bank Transfer / Loan EMI','Shopping','Groceries','Dining','Health & Personal Care','Subscriptions & Software','Card Fees & Taxes','Wallet Load / Transfer','Recharge','Personal / UPI Payments','Money Received','Uncategorized / Review','Other'];
