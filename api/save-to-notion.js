@@ -54,10 +54,24 @@ async function queryAll(dataSourceId) {
 }
 
 async function createPage(dataSourceId, properties) {
-  return notion('/pages', {
-    method: 'POST',
-    body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties })
-  });
+  try {
+    return await notion('/pages', {
+      method: 'POST',
+      body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties })
+    });
+  } catch (error) {
+    // If the Category property has not yet been added in Notion, keep the
+    // transaction save working rather than failing the whole statement.
+    if (properties.Category && /Category|property/i.test(String(error.message || ''))) {
+      const retryProperties = { ...properties };
+      delete retryProperties.Category;
+      return notion('/pages', {
+        method: 'POST',
+        body: JSON.stringify({ parent: { type: 'data_source_id', data_source_id: dataSourceId }, properties: retryProperties })
+      });
+    }
+    throw error;
+  }
 }
 
 function text(value) { return [{ type: 'text', text: { content: String(value ?? '').slice(0, 1900) } }]; }
@@ -101,6 +115,23 @@ function txKey(date, amount, name) {
   return `${d}|${a}|${n}`;
 }
 
+
+// Website categories are the canonical names. Older Budget rows in Notion may
+// still use legacy labels, so these aliases keep existing budget amounts working.
+const BUDGET_CATEGORY_ALIASES = {
+  'Credit Card Payment': ['Credit Card Payment', 'Credit card', 'Credit'],
+  'Travel & Transport': ['Travel & Transport', 'Travel'],
+  'Fuel & Transport': ['Fuel & Transport', 'Petrol'],
+  'Groceries': ['Groceries', 'Grocery'],
+  'Dining': ['Dining', 'Restaurant'],
+  'Subscriptions & Software': ['Subscriptions & Software', 'Entertainment'],
+};
+
+function budgetCategoryCandidates(category) {
+  const canonical = String(category || '').trim();
+  return BUDGET_CATEGORY_ALIASES[canonical] || [canonical];
+}
+
 function buildExistingKeySet(pages) {
   const set = new Set();
   for (const page of pages) {
@@ -132,6 +163,7 @@ async function handler(req, res) {
   const incomesId = env('NOTION_INCOMES_DATA_SOURCE_ID', 'NOTION_INCOMES_DATABASE_ID');
   const monthId = env('NOTION_MONTH_DATA_SOURCE_ID', 'NOTION_MONTH_DATABASE_ID');
   const budgetId = env('NOTION_BUDGET_DATA_SOURCE_ID', 'NOTION_BUDGET_DATABASE_ID');
+  const writeCategory = String(process.env.NOTION_WRITE_CATEGORY || 'false').toLowerCase() === 'true';
 
   if (!expensesId || !incomesId) {
     return res.status(500).json({ error: 'Expenses or Incomes Notion data source ID is missing in Vercel' });
@@ -166,7 +198,8 @@ async function handler(req, res) {
     const findBudgetPage = category => {
       const needle = String(category || '').trim().toLowerCase();
       if (!needle) return null;
-      return budgetPages.find(page => getPlainTitle(page).trim().toLowerCase() === needle) || null;
+      const candidates = budgetCategoryCandidates(category).map(x => x.toLowerCase());
+      return budgetPages.find(page => candidates.includes(getPlainTitle(page).trim().toLowerCase())) || null;
     };
 
     let savedTransactions = 0;
@@ -191,12 +224,14 @@ async function handler(req, res) {
         'Date': { date: tx.date ? { start: tx.date } : null },
         'Amount': { number: Number(tx.amount || 0) },
         'Type': { select: { name: /refund/i.test(tx.category || tx.remarks || '') ? 'Refund' : 'Other' } },
-        'Pay': { multi_select: [{ name: 'Bank' }] }
+        'Pay': { multi_select: [{ name: 'Bank' }] },
+        ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Money Received') } } : {})
       } : {
         'Expense': { title: title(displayName) },
         'Date': { date: tx.date ? { start: tx.date } : null },
         'Amount': { number: Number(tx.amount || 0) },
-        'Pay': { multi_select: [{ name: 'Bank' }] }
+        'Pay': { multi_select: [{ name: 'Bank' }] },
+        ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Uncategorized / Review') } } : {})
       };
 
       const monthPage = findMonthPage(tx.date);
