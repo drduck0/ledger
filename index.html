@@ -1050,7 +1050,7 @@ function categorize(t){
   const r = (t.remarks || '').toLowerCase();
 
   if (STATEMENT_TYPE === 'credit-card') {
-    if (t.drcr === 'Cr' && /payment received|payment|bbps payment/.test(r)) return 'Financial Payments';
+    if (t.drcr === 'Cr' && /payment received|payment|bbps payment/.test(r)) return 'Credit Card Payment';
     if (t.drcr === 'Cr') return 'Income / Received';
     if (/fee on wallet load|dcc fee|fuel surcharge|igst|\btax\b|\bgst\b/.test(r)) return 'Financial Payments';
     if (/amazon pay in grocery|amazon pay.*grocery|zepto|blinkit|bigbasket|dmart|instamart/.test(r)) return 'Groceries';
@@ -1067,7 +1067,7 @@ function categorize(t){
 
   // Bank statement: keep only strong, explicit rules.
   if (t.drcr === 'Dr' && /zarivaul/.test(r) && Math.abs(t.amount - 51) < 0.5) return 'Investments';
-  if (t.drcr === 'Dr' && /amazonpayccbil/.test(r)) return 'Financial Payments';
+  if (t.drcr === 'Dr' && /amazonpayccbil/.test(r)) return 'Credit Card Payment';
   if (t.drcr === 'Dr' && /sbi life/.test(r)) return 'Bills & Subscriptions';
   if (t.drcr === 'Dr' && /irctc/.test(r)) return 'Travel & Transport';
   if (t.drcr === 'Dr' && /fuel|petrol|diesel|pump/.test(r)) return 'Petrol';
@@ -1106,7 +1106,7 @@ function renderChat(filename){
   const totalCredit = credits.reduce((s,t)=>s+t.amount,0);
   const invest = debits.filter(t=>t.category==='Investments');
   const investTotal = invest.reduce((s,t)=>s+t.amount,0);
-  const ccPaid = STATEMENT_TYPE === 'credit-card' ? credits.filter(t=>t.category==='Financial Payments') : debits.filter(t=>t.category==='Financial Payments');
+  const ccPaid = STATEMENT_TYPE === 'credit-card' ? credits.filter(t=>t.category==='Credit Card Payment') : debits.filter(t=>t.category==='Credit Card Payment');
   const ccTotal = ccPaid.reduce((s,t)=>s+t.amount,0);
   const chargeTotal = STATEMENT_TYPE === 'credit-card' ? totalDebit : totalDebit;
   const chrono = chronological(ALL_TXNS);
@@ -1326,7 +1326,7 @@ async function saveToNotion(){
   }
 }
 
-const CATEGORY_OPTIONS = ['Food & Dining','Groceries','Shopping','Travel & Transport','Petrol','Recharge','Bills & Subscriptions','Health & Personal','Financial Payments','Investments','Transfers','Entertainment','Rent','Other / Review','Income / Received'];
+const CATEGORY_OPTIONS = ['Food & Dining','Groceries','Shopping','Travel & Transport','Petrol','Recharge','Bills & Subscriptions','Health & Personal','Financial Payments','Credit Card Payment','Investments','Transfers','Entertainment','Rent','Other / Review','Income / Received'];
 
 function renderInsights(){
   const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
