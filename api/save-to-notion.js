@@ -119,16 +119,19 @@ function txKey(date, amount, name) {
 // Website categories are the canonical names. Older Budget rows in Notion may
 // still use legacy labels, so these aliases keep existing budget amounts working.
 const BUDGET_CATEGORY_ALIASES = {
-  'Food & Dining': ['Food & Dining', 'Groceries', 'Grocery', 'Dining', 'Restaurant'],
+  'Food & Dining': ['Food & Dining', 'Dining', 'Restaurant'],
+  'Groceries': ['Groceries', 'Grocery'],
   'Shopping': ['Shopping'],
-  'Transport': ['Transport', 'Travel & Transport', 'Travel'],
+  'Travel & Transport': ['Travel & Transport', 'Transport', 'Travel'],
   'Petrol': ['Petrol', 'Fuel & Transport'],
   'Recharge': ['Recharge'],
-  'Bills & Subscriptions': ['Bills & Subscriptions', 'Insurance', 'Subscriptions & Software', 'Entertainment', 'Rent'],
+  'Bills & Subscriptions': ['Bills & Subscriptions', 'Insurance', 'Subscriptions & Software'],
   'Health & Personal': ['Health & Personal', 'Health & Personal Care'],
   'Financial Payments': ['Financial Payments', 'Credit Card Payment', 'Credit card', 'Credit', 'Card Fees & Taxes'],
   'Investments': ['Investments', 'Investment (SIP)'],
   'Transfers': ['Transfers', 'Bank Transfer / Loan EMI', 'Wallet Load / Transfer', 'Personal / UPI Payments'],
+  'Entertainment': ['Entertainment'],
+  'Rent': ['Rent'],
   'Other / Review': ['Other / Review', 'Uncategorized / Review', 'Other'],
 };
 

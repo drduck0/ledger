@@ -1053,7 +1053,7 @@ function categorize(t){
     if (t.drcr === 'Cr' && /payment received|payment|bbps payment/.test(r)) return 'Financial Payments';
     if (t.drcr === 'Cr') return 'Income / Received';
     if (/fee on wallet load|dcc fee|fuel surcharge|igst|\btax\b|\bgst\b/.test(r)) return 'Financial Payments';
-    if (/amazon pay in grocery|amazon pay.*grocery|zepto/.test(r)) return 'Food & Dining';
+    if (/amazon pay in grocery|amazon pay.*grocery|zepto|blinkit|bigbasket|dmart|instamart/.test(r)) return 'Groceries';
     if (/amazon pay wallet load/.test(r)) return 'Transfers';
     if (/amazon pay in recharge/.test(r)) return 'Recharge';
     if (/zomato|restaurant brands|swiggy|restaurant|food/.test(r)) return 'Food & Dining';
@@ -1074,6 +1074,7 @@ function categorize(t){
   if (t.drcr === 'Dr' && /recharge|mobile recharge|prepaid/.test(r)) return 'Recharge';
   if (t.drcr === 'Dr' && /rapido/.test(r)) return 'Travel & Transport';
   if (t.drcr === 'Dr' && /bank acc/.test(r)) return 'Transfers';
+  if (t.drcr === 'Dr' && /zepto|blinkit|bigbasket|dmart|instamart|grocery/.test(r)) return 'Groceries';
   if (t.drcr === 'Dr' && /amazon p/.test(r)) return 'Shopping';
   if (t.drcr === 'Cr') return 'Income / Received';
   return 'Other / Review';
@@ -1325,7 +1326,7 @@ async function saveToNotion(){
   }
 }
 
-const CATEGORY_OPTIONS = ['Food & Dining','Shopping','Travel & Transport','Petrol','Recharge','Bills & Subscriptions','Health & Personal','Financial Payments','Investments','Transfers','Entertainment','Rent','Other / Review','Income / Received'];
+const CATEGORY_OPTIONS = ['Food & Dining','Groceries','Shopping','Travel & Transport','Petrol','Recharge','Bills & Subscriptions','Health & Personal','Financial Payments','Investments','Transfers','Entertainment','Rent','Other / Review','Income / Received'];
 
 function renderInsights(){
   const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
