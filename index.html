@@ -695,7 +695,7 @@ function applySavedCategory(t){
   const key = STATEMENT_TYPE + '|' + merchantKey(t);
   if (!key || !categoryRules[key]) return null;
   // Travel is now consolidated into the single "Travel & Transport" category.
-  return categoryRules[key] === 'Travel' ? 'Travel & Transport' : categoryRules[key];
+  return categoryRules[key] === 'Travel' || categoryRules[key] === 'Transport' ? 'Travel & Transport' : categoryRules[key];
 }
 
 function rememberCategory(t, category){
@@ -740,7 +740,7 @@ async function processArrayBuffer(buf, filename){
     }
     ALL_TXNS = txns.map(t => {
       const category = applySavedCategory(t) || categorize(t);
-      return {...t, remarks: cleanDisplayName(t.remarks), category: category === 'Travel' ? 'Travel & Transport' : category};
+      return {...t, remarks: cleanDisplayName(t.remarks), category: (category === 'Travel' || category === 'Transport') ? 'Travel & Transport' : category};
     });
     const ccHint = STATEMENT_TYPE === 'credit-card' ? ' · credit-card statement' : ' · bank statement';
     setStatus('Found ' + ALL_TXNS.length + ' transactions' + ccHint + '.');
@@ -1050,31 +1050,33 @@ function categorize(t){
   const r = (t.remarks || '').toLowerCase();
 
   if (STATEMENT_TYPE === 'credit-card') {
-    if (t.drcr === 'Cr' && /payment received|payment|bbps payment/.test(r)) return 'Credit Card Payment';
-    if (t.drcr === 'Cr') return 'Refund / Reversal';
-    if (/fee on wallet load|dcc fee|fuel surcharge|igst|\btax\b|\bgst\b/.test(r)) return 'Card Fees & Taxes';
-    if (/amazon pay in grocery|amazon pay.*grocery|zepto/.test(r)) return 'Groceries';
-    if (/amazon pay wallet load/.test(r)) return 'Wallet Load / Transfer';
+    if (t.drcr === 'Cr' && /payment received|payment|bbps payment/.test(r)) return 'Financial Payments';
+    if (t.drcr === 'Cr') return 'Income / Received';
+    if (/fee on wallet load|dcc fee|fuel surcharge|igst|\btax\b|\bgst\b/.test(r)) return 'Financial Payments';
+    if (/amazon pay in grocery|amazon pay.*grocery|zepto/.test(r)) return 'Food & Dining';
+    if (/amazon pay wallet load/.test(r)) return 'Transfers';
     if (/amazon pay in recharge/.test(r)) return 'Recharge';
-    if (/zomato|restaurant brands|swiggy|restaurant|food/.test(r)) return 'Dining';
-    if (/skin clinic|medical|hospital|pharmacy|doctor|lenskart|eyewear|optical/.test(r)) return 'Health & Personal Care';
-    if (/fuel|petrol|diesel|pump/.test(r)) return 'Fuel & Transport';
-    if (/canva|software|subscription/.test(r)) return 'Subscriptions & Software';
-    if (/insurance|icici lombard|sbi life/.test(r)) return 'Insurance';
+    if (/zomato|restaurant brands|swiggy|restaurant|food/.test(r)) return 'Food & Dining';
+    if (/skin clinic|medical|hospital|pharmacy|doctor|lenskart|eyewear|optical/.test(r)) return 'Health & Personal';
+    if (/fuel|petrol|diesel|pump/.test(r)) return 'Petrol';
+    if (/canva|software|subscription/.test(r)) return 'Bills & Subscriptions';
+    if (/insurance|icici lombard|sbi life/.test(r)) return 'Bills & Subscriptions';
     if (/irctc|flight|hotel|uber|rapido/.test(r)) return 'Travel & Transport';
-    return 'Uncategorized / Review';
+    return 'Other / Review';
   }
 
   // Bank statement: keep only strong, explicit rules.
-  if (t.drcr === 'Dr' && /zarivaul/.test(r) && Math.abs(t.amount - 51) < 0.5) return 'Investment (SIP)';
-  if (t.drcr === 'Dr' && /amazonpayccbil/.test(r)) return 'Credit Card Payment';
-  if (t.drcr === 'Dr' && /sbi life/.test(r)) return 'Insurance';
+  if (t.drcr === 'Dr' && /zarivaul/.test(r) && Math.abs(t.amount - 51) < 0.5) return 'Investments';
+  if (t.drcr === 'Dr' && /amazonpayccbil/.test(r)) return 'Financial Payments';
+  if (t.drcr === 'Dr' && /sbi life/.test(r)) return 'Bills & Subscriptions';
   if (t.drcr === 'Dr' && /irctc/.test(r)) return 'Travel & Transport';
-  if (t.drcr === 'Dr' && /pump|rapido/.test(r)) return 'Fuel & Transport';
-  if (t.drcr === 'Dr' && /bank acc/.test(r)) return 'Bank Transfer / Loan EMI';
+  if (t.drcr === 'Dr' && /fuel|petrol|diesel|pump/.test(r)) return 'Petrol';
+  if (t.drcr === 'Dr' && /recharge|mobile recharge|prepaid/.test(r)) return 'Recharge';
+  if (t.drcr === 'Dr' && /rapido/.test(r)) return 'Travel & Transport';
+  if (t.drcr === 'Dr' && /bank acc/.test(r)) return 'Transfers';
   if (t.drcr === 'Dr' && /amazon p/.test(r)) return 'Shopping';
-  if (t.drcr === 'Cr') return 'Money Received';
-  return 'Uncategorized / Review';
+  if (t.drcr === 'Cr') return 'Income / Received';
+  return 'Other / Review';
 }
 
 function fmt(n){ return '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -1101,9 +1103,9 @@ function renderChat(filename){
   const credits = ALL_TXNS.filter(t => t.drcr === 'Cr');
   const totalDebit = debits.reduce((s,t)=>s+t.amount,0);
   const totalCredit = credits.reduce((s,t)=>s+t.amount,0);
-  const invest = debits.filter(t=>t.category==='Investment (SIP)');
+  const invest = debits.filter(t=>t.category==='Investments');
   const investTotal = invest.reduce((s,t)=>s+t.amount,0);
-  const ccPaid = STATEMENT_TYPE === 'credit-card' ? credits.filter(t=>t.category==='Credit Card Payment') : debits.filter(t=>t.category==='Credit Card Payment');
+  const ccPaid = STATEMENT_TYPE === 'credit-card' ? credits.filter(t=>t.category==='Financial Payments') : debits.filter(t=>t.category==='Financial Payments');
   const ccTotal = ccPaid.reduce((s,t)=>s+t.amount,0);
   const chargeTotal = STATEMENT_TYPE === 'credit-card' ? totalDebit : totalDebit;
   const chrono = chronological(ALL_TXNS);
@@ -1272,7 +1274,7 @@ function buildNotionPayload(){
         date: isoDate(t.date),
         transactionId: t.id ? String(t.id) : '',
         remarks: raw,
-        category: t.category || 'Uncategorized / Review',
+        category: t.category || 'Other / Review',
         type: t.drcr === 'Cr' ? 'Received' : 'Spent',
         amount: Number(t.amount || 0),
         balance: typeof t.balance === 'number' ? t.balance : null
@@ -1323,7 +1325,7 @@ async function saveToNotion(){
   }
 }
 
-const CATEGORY_OPTIONS = ['Investment (SIP)','Credit Card Payment','Refund / Reversal','Insurance','Rent','Travel & Transport','Fuel & Transport','Bank Transfer / Loan EMI','Shopping','Groceries','Dining','Health & Personal Care','Subscriptions & Software','Card Fees & Taxes','Wallet Load / Transfer','Recharge','Personal / UPI Payments','Money Received','Uncategorized / Review','Other'];
+const CATEGORY_OPTIONS = ['Food & Dining','Shopping','Travel & Transport','Petrol','Recharge','Bills & Subscriptions','Health & Personal','Financial Payments','Investments','Transfers','Entertainment','Rent','Other / Review','Income / Received'];
 
 function renderInsights(){
   const debits = ALL_TXNS.filter(t => t.drcr === 'Dr');
@@ -1359,14 +1361,14 @@ function renderInsights(){
     byDay[day] = (byDay[day] || 0) + t.amount;
   });
   const busiest = Object.entries(byDay).sort((a,b)=>b[1]-a[1])[0];
-  const reviewCount = ALL_TXNS.filter(t => t.category === 'Uncategorized / Review').length;
+  const reviewCount = ALL_TXNS.filter(t => t.category === 'Other / Review').length;
   const largestCategory = categoryTotals()[0];
 
   const facts = [
     largest ? {label:'Largest expense', value:fmt(largest.amount), detail:`${payeeLabel(largest.remarks)} · ${largest.date}`} : null,
     busiest ? {label:'Highest-spend weekday', value:busiest[0], detail:fmt(busiest[1])+' spent across that weekday'} : null,
     largestCategory ? {label:'Largest category', value:largestCategory[0], detail:fmt(largestCategory[1])+' total'} : null,
-    {label:'Needs review', value:String(reviewCount), detail:reviewCount ? 'Transactions still marked Uncategorized / Review' : 'Everything is currently categorized'}
+    {label:'Needs review', value:String(reviewCount), detail:reviewCount ? 'Transactions still marked Other / Review' : 'Everything is currently categorized'}
   ].filter(Boolean);
 
   document.getElementById('insightFacts').innerHTML = facts.map(f => `
@@ -1407,7 +1409,7 @@ function renderInsights(){
   });
   const strongestReceivedDay = Object.entries(receivedByDay).sort((a,b)=>b[1]-a[1])[0];
   const receivedSource = sources[0];
-  const receivedReviewCount = credits.filter(t => t.category === 'Uncategorized / Review').length;
+  const receivedReviewCount = credits.filter(t => t.category === 'Other / Review').length;
   const receivedFacts = [
     largestReceipt ? {
       label:'Largest receipt',
@@ -1428,7 +1430,7 @@ function renderInsights(){
       label:'Needs review',
       value:String(receivedReviewCount),
       detail:receivedReviewCount
-        ? 'Received transactions still marked Uncategorized / Review'
+        ? 'Received transactions still marked Other / Review'
         : 'Everything received is currently categorized'
     }
   ].filter(Boolean);

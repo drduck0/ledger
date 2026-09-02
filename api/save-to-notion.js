@@ -119,12 +119,17 @@ function txKey(date, amount, name) {
 // Website categories are the canonical names. Older Budget rows in Notion may
 // still use legacy labels, so these aliases keep existing budget amounts working.
 const BUDGET_CATEGORY_ALIASES = {
-  'Credit Card Payment': ['Credit Card Payment', 'Credit card', 'Credit'],
-  'Travel & Transport': ['Travel & Transport', 'Travel'],
-  'Fuel & Transport': ['Fuel & Transport', 'Petrol'],
-  'Groceries': ['Groceries', 'Grocery'],
-  'Dining': ['Dining', 'Restaurant'],
-  'Subscriptions & Software': ['Subscriptions & Software', 'Entertainment'],
+  'Food & Dining': ['Food & Dining', 'Groceries', 'Grocery', 'Dining', 'Restaurant'],
+  'Shopping': ['Shopping'],
+  'Transport': ['Transport', 'Travel & Transport', 'Travel'],
+  'Petrol': ['Petrol', 'Fuel & Transport'],
+  'Recharge': ['Recharge'],
+  'Bills & Subscriptions': ['Bills & Subscriptions', 'Insurance', 'Subscriptions & Software', 'Entertainment', 'Rent'],
+  'Health & Personal': ['Health & Personal', 'Health & Personal Care'],
+  'Financial Payments': ['Financial Payments', 'Credit Card Payment', 'Credit card', 'Credit', 'Card Fees & Taxes'],
+  'Investments': ['Investments', 'Investment (SIP)'],
+  'Transfers': ['Transfers', 'Bank Transfer / Loan EMI', 'Wallet Load / Transfer', 'Personal / UPI Payments'],
+  'Other / Review': ['Other / Review', 'Uncategorized / Review', 'Other'],
 };
 
 function budgetCategoryCandidates(category) {
@@ -225,13 +230,13 @@ async function handler(req, res) {
         'Amount': { number: Number(tx.amount || 0) },
         'Type': { select: { name: /refund/i.test(tx.category || tx.remarks || '') ? 'Refund' : 'Other' } },
         'Pay': { multi_select: [{ name: 'Bank' }] },
-        ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Money Received') } } : {})
+        ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Income / Received') } } : {})
       } : {
         'Expense': { title: title(displayName) },
         'Date': { date: tx.date ? { start: tx.date } : null },
         'Amount': { number: Number(tx.amount || 0) },
         'Pay': { multi_select: [{ name: 'Bank' }] },
-        ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Uncategorized / Review') } } : {})
+        ...(writeCategory ? { 'Category': { rich_text: text(tx.category || 'Other / Review') } } : {})
       };
 
       const monthPage = findMonthPage(tx.date);
